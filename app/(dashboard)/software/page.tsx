@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, RefreshCw, AlertCircle, Pencil } from 'lucide-react';
+import { Plus, Search, RefreshCw, AlertCircle, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
 import { softwareApi } from '@/lib/api';
@@ -11,12 +11,19 @@ import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { toast } from 'sonner';
 
 const ROLES_CAN_EDIT = ['admin', 'operario'];
 const ROLES_TECNICOS = ['tecnico_interno', 'tecnico_proveedor'];
+
+// Valores permitidos por el backend para "tipo"
+const TIPOS_SOFTWARE = ['Sistema Operativo', 'Ofimatica', 'Seguridad', 'Gestion Judicial', 'Utilidades', 'Otro'];
+const LICENCIA_NONE = '__none__';
+// Enum de tipo de licencia (según valores usados en la app)
+const TIPOS_LICENCIA = ['Volumen', 'Suscripcion', 'OEM', 'Otro'];
 
 const softwareEstadoStyle: Record<string, string> = {
   Activo: 'bg-success-light text-success border-success/20',
@@ -29,9 +36,13 @@ const softwareEstadoStyle: Record<string, string> = {
 const columns: ColumnDef<Software>[] = [
   {
     accessorKey: 'nro_sw',
-    header: 'Código',
+    header: 'Nro. Software',
     size: 100,
-    cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{row.original.nro_sw ?? '—'}</span>,
+    cell: ({ row }) => {
+      const s = row.original;
+      const nro = s.nro_sw ?? s.nroSw;
+      return <span className="font-mono text-xs text-muted-foreground">{nro ?? '—'}</span>;
+    },
   },
   {
     accessorKey: 'nombre',
@@ -39,7 +50,7 @@ const columns: ColumnDef<Software>[] = [
     cell: ({ row }) => (
       <div>
         <p className="text-sm font-medium text-foreground">{row.original.nombre}</p>
-        {row.original.version && <p className="text-xs text-muted-foreground">v{row.original.version}</p>}
+        {row.original.version && <p className="text-xs text-muted-foreground">{row.original.version}</p>}
       </div>
     ),
   },
@@ -53,15 +64,20 @@ const columns: ColumnDef<Software>[] = [
     accessorKey: 'tipo_licencia',
     header: 'Licencia',
     size: 120,
-    cell: ({ row }) => <span className="text-xs text-foreground">{row.original.tipo_licencia ?? '—'}</span>,
+    cell: ({ row }) => {
+      const s = row.original;
+      const lic = s.tipo_licencia ?? s.tipoLicencia;
+      return <span className="text-xs text-foreground">{lic ?? '—'}</span>;
+    },
   },
   {
     accessorKey: 'instalaciones',
     header: 'Instalaciones',
     size: 120,
     cell: ({ row }) => {
-      const actual = row.original.instalaciones_actuales ?? 0;
-      const max = row.original.max_instalaciones;
+      const s = row.original;
+      const actual = s.instalaciones_actuales ?? s.instalacionesAct ?? 0;
+      const max = s.max_instalaciones ?? s.maxInstalaciones;
       const atLimit = max != null && actual >= max;
       return (
         <span className={cn('text-sm', atLimit && 'text-warning font-semibold')}>
@@ -102,7 +118,11 @@ const columns: ColumnDef<Software>[] = [
               : 'text-muted-foreground',
         )}
       >
-        {row.original.fecha_vencimiento ? formatDate(row.original.fecha_vencimiento) : '—'}
+        {(() => {
+          const s = row.original;
+          const fecha = s.fecha_vencimiento ?? s.fechaVencimiento;
+          return fecha ? formatDate(fecha) : '—';
+        })()}
       </span>
     ),
   },
@@ -122,8 +142,19 @@ export default function SoftwarePage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editItem, setEditItem] = useState<Software | null>(null);
+  const [creatingSoftware, setCreatingSoftware] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [editForm, setEditForm] = useState({ nombre: '', version: '', tipo: '', nro_sw: '', fecha_vencimiento: '' });
+  const [editForm, setEditForm] = useState({
+    nombre: '',
+    version: '',
+    tipo: 'Otro',
+    nro_sw: '',
+    proveedor: '',
+    tipo_licencia: '',
+    max_instalaciones: '' as string,
+    fecha_vencimiento: '',
+    observaciones: '',
+  });
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -145,28 +176,53 @@ export default function SoftwarePage() {
 
   const openEdit = (s: Software) => {
     setEditItem(s);
+    setCreatingSoftware(false);
+    const maxInst = s.max_instalaciones ?? s.maxInstalaciones;
     setEditForm({
       nombre: s.nombre,
       version: s.version ?? '',
-      tipo: s.tipo,
-      nro_sw: s.nro_sw ?? '',
-      fecha_vencimiento: s.fecha_vencimiento ?? '',
+      tipo: TIPOS_SOFTWARE.includes(s.tipo) ? s.tipo : 'Otro',
+      nro_sw: s.nro_sw ?? s.nroSw ?? '',
+      proveedor: s.proveedor ?? '',
+      tipo_licencia: s.tipo_licencia ?? s.tipoLicencia ?? '',
+      max_instalaciones: maxInst != null ? String(maxInst) : '',
+      fecha_vencimiento: s.fecha_vencimiento ?? s.fechaVencimiento ?? '',
+      observaciones: s.observaciones ?? '',
     });
   };
 
   const handleSaveSoftware = async () => {
-    if (!editItem) return;
+    if (!creatingSoftware && !editItem) return;
+
+    if (!editForm.nombre || !editForm.tipo) {
+      toast.error('Nombre y tipo son obligatorios');
+      return;
+    }
     setSaving(true);
     try {
-      await softwareApi.update(editItem.id, {
+      const basePayload = {
         nombre: editForm.nombre,
         version: editForm.version || undefined,
         tipo: editForm.tipo,
-        nro_sw: editForm.nro_sw || undefined,
+        proveedor: editForm.proveedor || undefined,
+        tipo_licencia: editForm.tipo_licencia || undefined,
+        max_instalaciones: editForm.max_instalaciones !== '' ? Number(editForm.max_instalaciones) : undefined,
         fecha_vencimiento: editForm.fecha_vencimiento || undefined,
-      });
-      toast.success('Software actualizado');
+        observaciones: editForm.observaciones || undefined,
+      };
+      if (creatingSoftware) {
+        await softwareApi.create({
+          ...basePayload,
+          nro_sw: editForm.nro_sw || undefined,
+        });
+        toast.success('Software creado');
+      } else if (editItem) {
+        // El backend no permite actualizar nro_sw por PATCH
+        await softwareApi.update(editItem.id, basePayload);
+        toast.success('Software actualizado');
+      }
       setEditItem(null);
+      setCreatingSoftware(false);
       load(search);
     } catch {
       toast.error('Error al guardar');
@@ -182,19 +238,39 @@ export default function SoftwarePage() {
           {
             id: 'acciones',
             header: '',
-            size: 60,
+            size: 100,
             cell: ({ row }: { row: { original: Software } }) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openEdit(row.original);
-                }}
-              >
-                <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(row.original);
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm('¿Dar de baja este software? (soft delete)')) return;
+                    try {
+                      await softwareApi.delete(row.original.id);
+                      toast.success('Software dado de baja');
+                      load(search);
+                    } catch {
+                      toast.error('Error al eliminar');
+                    }
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             ),
           } as ColumnDef<Software>,
         ]
@@ -205,7 +281,7 @@ export default function SoftwarePage() {
 
   return (
     <div className="space-y-4">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
@@ -227,7 +303,24 @@ export default function SoftwarePage() {
               {meta.total} registro{meta.total !== 1 ? 's' : ''}
             </span>
           )}
-          <Button size="sm">
+          <Button
+            size="sm"
+            onClick={() => {
+              setCreatingSoftware(true);
+              setEditItem(null);
+              setEditForm({
+                nombre: '',
+                version: '',
+                tipo: 'Otro',
+                nro_sw: '',
+                proveedor: '',
+                tipo_licencia: '',
+                max_instalaciones: '',
+                fecha_vencimiento: '',
+                observaciones: '',
+              });
+            }}
+          >
             <Plus className="w-4 h-4" />
             Nuevo Software
           </Button>
@@ -236,38 +329,128 @@ export default function SoftwarePage() {
 
       <DataTable data={software} columns={columnsWithEdit} meta={meta} isLoading={loading} emptyMessage="No se encontró software registrado" />
 
-      <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
+      <Dialog
+        open={!!editItem || creatingSoftware}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditItem(null);
+            setCreatingSoftware(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg p-0">
           <div className="px-6 py-5 border-b border-border">
-            <h3 className="text-base font-semibold text-foreground">Editar software</h3>
+            <h3 className="text-base font-semibold text-foreground">{creatingSoftware ? 'Nuevo software' : 'Editar software'}</h3>
           </div>
-          {editItem && (
-            <div className="px-6 py-5 space-y-5">
+          {(editItem || creatingSoftware) && (
+            <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nombre</label>
-                <Input value={editForm.nombre} onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">
+                  Nombre <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={editForm.nombre}
+                  onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))}
+                  className="h-9 text-sm"
+                  placeholder="Texto"
+                />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Versión</label>
-                  <Input value={editForm.version} onChange={(e) => setEditForm((f) => ({ ...f, version: e.target.value }))} className="h-9 text-sm" />
+                  <Input
+                    value={editForm.version}
+                    onChange={(e) => setEditForm((f) => ({ ...f, version: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Texto"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Código</label>
-                  <Input value={editForm.nro_sw} onChange={(e) => setEditForm((f) => ({ ...f, nro_sw: e.target.value }))} className="h-9 text-sm" />
+                  <label className="text-sm font-medium text-foreground">Nro. Software</label>
+                  <Input
+                    value={editForm.nro_sw}
+                    onChange={(e) => setEditForm((f) => ({ ...f, nro_sw: e.target.value }))}
+                    className="h-9 text-sm font-mono"
+                    placeholder="Ej. SW-001"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Tipo</label>
-                <Input value={editForm.tipo} onChange={(e) => setEditForm((f) => ({ ...f, tipo: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">
+                  Tipo <span className="text-destructive">*</span>
+                </label>
+                <Select value={editForm.tipo} onValueChange={(v) => setEditForm((f) => ({ ...f, tipo: v }))}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIPOS_SOFTWARE.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Proveedor</label>
+                  <Input
+                    value={editForm.proveedor}
+                    onChange={(e) => setEditForm((f) => ({ ...f, proveedor: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Texto"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Tipo de licencia</label>
+                  <Select
+                    value={editForm.tipo_licencia || LICENCIA_NONE}
+                    onValueChange={(v) => setEditForm((f) => ({ ...f, tipo_licencia: v === LICENCIA_NONE ? '' : v }))}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Seleccionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={LICENCIA_NONE}>Sin licencia</SelectItem>
+                      {TIPOS_LICENCIA.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Máx. instalaciones</label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={editForm.max_instalaciones}
+                    onChange={(e) => setEditForm((f) => ({ ...f, max_instalaciones: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Número"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Fecha vencimiento</label>
+                  <Input
+                    type="date"
+                    value={editForm.fecha_vencimiento}
+                    onChange={(e) => setEditForm((f) => ({ ...f, fecha_vencimiento: e.target.value }))}
+                    className="h-9 text-sm"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Fecha vencimiento</label>
+                <label className="text-sm font-medium text-foreground">Observaciones</label>
                 <Input
-                  type="date"
-                  value={editForm.fecha_vencimiento}
-                  onChange={(e) => setEditForm((f) => ({ ...f, fecha_vencimiento: e.target.value }))}
-                  className="h-9 text-sm"
+                  value={editForm.observaciones}
+                  onChange={(e) => setEditForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  className="h-9 text-sm min-h-[72px]"
+                  placeholder="Texto"
                 />
               </div>
               <div className="flex justify-end gap-3 pt-2">

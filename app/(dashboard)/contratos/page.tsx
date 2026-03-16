@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import { Plus, Search, RefreshCw, Pencil } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
-import { contratosApi } from '@/lib/api';
-import type { Contrato, PaginationMeta } from '@/lib/api';
+import { contratosApi, proveedoresApi } from '@/lib/api';
+import type { Contrato, PaginationMeta, Proveedor } from '@/lib/api';
 import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatDate, formatMoney, cn } from '@/lib/utils';
 import { differenceInDays, parseISO } from 'date-fns';
 import { useAuthStore } from '@/store/auth.store';
@@ -32,7 +33,11 @@ const columns: ColumnDef<Contrato>[] = [
     accessorKey: 'nro_contrato',
     header: 'Nro. Contrato',
     size: 130,
-    cell: ({ row }) => <span className="font-mono text-xs font-medium text-foreground">{row.original.nro_contrato}</span>,
+    cell: ({ row }) => {
+      const c = row.original;
+      const nro = c.nro_contrato ?? c.nroContrato;
+      return <span className="font-mono text-xs text-muted-foreground">{nro ?? '—'}</span>;
+    },
   },
   {
     accessorKey: 'proveedor',
@@ -50,12 +55,15 @@ const columns: ColumnDef<Contrato>[] = [
     header: 'Vencimiento',
     size: 150,
     cell: ({ row }) => {
-      const days = differenceInDays(parseISO(row.original.fecha_venc), new Date());
+      const c = row.original;
+      const fechaVenc = c.fecha_venc ?? c.fechaVenc;
+      if (!fechaVenc) {
+        return <span className="text-xs text-muted-foreground">—</span>;
+      }
+      const days = differenceInDays(parseISO(fechaVenc), new Date());
       return (
         <div>
-          <p className={cn('text-sm font-medium', days < 0 ? 'text-danger' : days <= 30 ? 'text-warning' : 'text-foreground')}>
-            {formatDate(row.original.fecha_venc)}
-          </p>
+          <p className={cn('text-sm font-medium', days < 0 ? 'text-danger' : days <= 30 ? 'text-warning' : 'text-foreground')}>{formatDate(fechaVenc)}</p>
           <p className={cn('text-[10px]', days < 0 ? 'text-danger' : days <= 30 ? 'text-warning' : 'text-muted-foreground')}>
             {days < 0 ? `Vencido hace ${Math.abs(days)}d` : days === 0 ? 'Vence hoy' : `En ${days} días`}
           </p>
@@ -99,8 +107,20 @@ export default function ContratosPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editItem, setEditItem] = useState<Contrato | null>(null);
+  const [creatingContrato, setCreatingContrato] = useState(false);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [saving, setSaving] = useState(false);
-  const [editForm, setEditForm] = useState({ nro_contrato: '', tipo: '', descripcion: '', fecha_inicio: '', fecha_venc: '', monto: '', moneda: 'ARS' });
+  const [editForm, setEditForm] = useState({
+    nro_contrato: '',
+    proveedor_id: '',
+    tipo: '',
+    descripcion: '',
+    fecha_inicio: '',
+    fecha_venc: '',
+    monto: '',
+    moneda: 'ARS',
+    observaciones: '',
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,29 +140,75 @@ export default function ContratosPage() {
     load();
   }, [load]);
 
+  const loadProveedores = useCallback(async () => {
+    try {
+      const res = await proveedoresApi.list();
+      setProveedores(res.data?.data ?? res.data ?? []);
+    } catch {
+      setProveedores([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (creatingContrato && proveedores.length === 0) loadProveedores();
+  }, [creatingContrato, proveedores.length, loadProveedores]);
+
   const filtered = search
-    ? contratos.filter(
-        (c) =>
-          c.nro_contrato.toLowerCase().includes(search.toLowerCase()) ||
+    ? contratos.filter((c) => {
+        const nro = c.nro_contrato ?? c.nroContrato ?? '';
+        return (
+          nro.toLowerCase().includes(search.toLowerCase()) ||
           c.proveedor?.nombre?.toLowerCase().includes(search.toLowerCase()) ||
-          c.tipo.toLowerCase().includes(search.toLowerCase()),
-      )
+          (c.tipo ?? '').toLowerCase().includes(search.toLowerCase())
+        );
+      })
     : contratos;
 
   const openEdit = (c: Contrato) => {
     setEditItem(c);
+    setCreatingContrato(false);
     setEditForm({
-      nro_contrato: c.nro_contrato,
+      nro_contrato: c.nro_contrato ?? c.nroContrato ?? '',
+      proveedor_id: c.proveedor?.id != null ? String(c.proveedor.id) : '',
       tipo: c.tipo,
       descripcion: c.descripcion ?? '',
       fecha_inicio: c.fecha_inicio ?? '',
-      fecha_venc: c.fecha_venc ?? '',
+      fecha_venc: c.fecha_venc ?? c.fechaVenc ?? '',
       monto: c.monto != null ? String(c.monto) : '',
       moneda: c.moneda ?? 'ARS',
+      observaciones: (c as { observaciones?: string }).observaciones ?? '',
     });
   };
 
   const handleSaveContrato = async () => {
+    if (creatingContrato) {
+      if (!editForm.nro_contrato.trim() || !editForm.proveedor_id || !editForm.tipo.trim() || !editForm.fecha_inicio || !editForm.fecha_venc) {
+        toast.error('Nro. contrato, proveedor, tipo, fecha inicio y fecha venc. son obligatorios');
+        return;
+      }
+      setSaving(true);
+      try {
+        await contratosApi.create({
+          nro_contrato: editForm.nro_contrato.trim(),
+          proveedor_id: Number(editForm.proveedor_id),
+          tipo: editForm.tipo.trim(),
+          descripcion: editForm.descripcion?.trim() || undefined,
+          fecha_inicio: editForm.fecha_inicio,
+          fecha_venc: editForm.fecha_venc,
+          monto: editForm.monto ? Number(editForm.monto) : undefined,
+          moneda: editForm.moneda || undefined,
+          observaciones: editForm.observaciones?.trim() || undefined,
+        });
+        toast.success('Contrato creado');
+        setCreatingContrato(false);
+        load();
+      } catch {
+        toast.error('Error al guardar');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (!editItem?.proveedor?.id) return;
     setSaving(true);
     try {
@@ -155,6 +221,7 @@ export default function ContratosPage() {
         fecha_venc: editForm.fecha_venc,
         monto: editForm.monto ? Number(editForm.monto) : undefined,
         moneda: editForm.moneda,
+        observaciones: editForm.observaciones?.trim() || undefined,
       });
       toast.success('Contrato actualizado');
       setEditItem(null);
@@ -196,7 +263,7 @@ export default function ContratosPage() {
 
   return (
     <div className="space-y-4">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar contratos…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
@@ -210,7 +277,24 @@ export default function ContratosPage() {
               {meta.total} contrato{meta.total !== 1 ? 's' : ''}
             </span>
           )}
-          <Button size="sm">
+          <Button
+            size="sm"
+            onClick={() => {
+              setCreatingContrato(true);
+              setEditItem(null);
+              setEditForm({
+                nro_contrato: '',
+                proveedor_id: '',
+                tipo: '',
+                descripcion: '',
+                fecha_inicio: '',
+                fecha_venc: '',
+                monto: '',
+                moneda: 'ARS',
+                observaciones: '',
+              });
+            }}
+          >
             <Plus className="w-4 h-4" />
             Nuevo Contrato
           </Button>
@@ -219,28 +303,78 @@ export default function ContratosPage() {
 
       <DataTable data={filtered} columns={columnsWithEdit} meta={meta} isLoading={loading} emptyMessage="No se encontraron contratos" />
 
-      <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
+      <Dialog
+        open={!!editItem || creatingContrato}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditItem(null);
+            setCreatingContrato(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg p-0">
           <div className="px-6 py-5 border-b border-border">
-            <h3 className="text-base font-semibold text-foreground">Editar contrato</h3>
+            <h3 className="text-base font-semibold text-foreground">{creatingContrato ? 'Nuevo contrato' : 'Editar contrato'}</h3>
           </div>
-          {editItem && (
-            <div className="px-6 py-5 space-y-5">
+          {(editItem || creatingContrato) && (
+            <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nro. contrato</label>
-                <Input value={editForm.nro_contrato} onChange={(e) => setEditForm((f) => ({ ...f, nro_contrato: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">
+                  Nro. contrato <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={editForm.nro_contrato}
+                  onChange={(e) => setEditForm((f) => ({ ...f, nro_contrato: e.target.value }))}
+                  className="h-9 text-sm font-mono"
+                  placeholder="Ej. CONT-2025-001"
+                />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Tipo</label>
-                <Input value={editForm.tipo} onChange={(e) => setEditForm((f) => ({ ...f, tipo: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">
+                  Proveedor <span className="text-destructive">*</span>
+                </label>
+                {creatingContrato ? (
+                  <Select value={editForm.proveedor_id} onValueChange={(v) => setEditForm((f) => ({ ...f, proveedor_id: v }))}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Seleccionar proveedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {proveedores.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input value={editItem?.proveedor?.nombre ?? '—'} className="h-9 text-sm bg-muted" readOnly disabled />
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Tipo <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={editForm.tipo}
+                  onChange={(e) => setEditForm((f) => ({ ...f, tipo: e.target.value }))}
+                  className="h-9 text-sm"
+                  placeholder="Ej. Mantenimiento HW"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Descripción</label>
-                <Input value={editForm.descripcion} onChange={(e) => setEditForm((f) => ({ ...f, descripcion: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  value={editForm.descripcion}
+                  onChange={(e) => setEditForm((f) => ({ ...f, descripcion: e.target.value }))}
+                  className="h-9 text-sm"
+                  placeholder="Texto"
+                />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Fecha inicio</label>
+                  <label className="text-sm font-medium text-foreground">
+                    Fecha inicio <span className="text-destructive">*</span>
+                  </label>
                   <Input
                     type="date"
                     value={editForm.fecha_inicio}
@@ -249,7 +383,9 @@ export default function ContratosPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Fecha venc.</label>
+                  <label className="text-sm font-medium text-foreground">
+                    Fecha venc. <span className="text-destructive">*</span>
+                  </label>
                   <Input
                     type="date"
                     value={editForm.fecha_venc}
@@ -261,12 +397,33 @@ export default function ContratosPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Monto</label>
-                  <Input type="number" value={editForm.monto} onChange={(e) => setEditForm((f) => ({ ...f, monto: e.target.value }))} className="h-9 text-sm" />
+                  <Input
+                    type="number"
+                    min={0}
+                    value={editForm.monto}
+                    onChange={(e) => setEditForm((f) => ({ ...f, monto: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Número"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Moneda</label>
-                  <Input value={editForm.moneda} onChange={(e) => setEditForm((f) => ({ ...f, moneda: e.target.value }))} className="h-9 text-sm" />
+                  <Input
+                    value={editForm.moneda}
+                    onChange={(e) => setEditForm((f) => ({ ...f, moneda: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="ARS"
+                  />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Observaciones</label>
+                <Input
+                  value={editForm.observaciones}
+                  onChange={(e) => setEditForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  className="h-9 text-sm"
+                  placeholder="Opcional"
+                />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <DialogClose asChild>
