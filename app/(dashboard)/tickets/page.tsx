@@ -138,7 +138,7 @@ export default function TicketsPage() {
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar tickets…" value={search} onChange={(e) => handleSearch(e.target.value)} className="pl-8 h-8 text-xs" />

@@ -6,6 +6,64 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Clock, User, Wrench, Send, Lock, AlertTriangle, Pencil, X } from 'lucide-react';
 import { ticketsApi, usuariosApi } from '@/lib/api';
 import type { Ticket, Comentario, User as ApiUser } from '@/lib/api';
+
+// Normaliza comentarios del backend (entidad TicketComentario: id, ticket_id, usuario_id, texto, interno, created_at, usuario)
+function normalizeComentarios(res: unknown): Comentario[] {
+  const raw = res as Record<string, unknown> | undefined;
+  const data = raw?.data as Record<string, unknown> | unknown[] | undefined;
+  let list: unknown[] = [];
+  if (Array.isArray(data)) list = data;
+  else if (data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).data))
+    list = (data as Record<string, unknown>).data as unknown[];
+  else if (data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).comentarios))
+    list = (data as Record<string, unknown>).comentarios as unknown[];
+  if (!list.length) return [];
+  return list.map((c) => {
+    const x = (c as Record<string, unknown>) ?? {};
+    // Backend: created_at / createdAt (TypeORM CreateDateColumn); puede venir como string ISO, Date o número (segundos/ms)
+    const rawFecha = x.created_at ?? x.createdAt ?? x.fechaCreacion ?? x.fecha_creacion;
+    const fechaCreacion = toIsoDateString(rawFecha);
+    // Backend: relación usuario (ManyToOne Usuario)
+    const autorRaw = (x.usuario ?? x.autor ?? x.user) as Record<string, unknown> | undefined;
+    const autor: ApiUser | undefined = autorRaw
+      ? {
+          id: Number(autorRaw.id),
+          nombre: String(autorRaw.nombre ?? autorRaw.name ?? '—'),
+          email: String(autorRaw.email ?? ''),
+          rol: String(autorRaw.rol ?? autorRaw.role ?? 'operario') as ApiUser['rol'],
+          activo: autorRaw.activo !== undefined ? Boolean(autorRaw.activo) : true,
+          ...(autorRaw.iniciales != null && { iniciales: String(autorRaw.iniciales) }),
+          ...((autorRaw.avatarColor ?? autorRaw.avatar_color) != null && {
+            avatarColor: String(autorRaw.avatarColor ?? autorRaw.avatar_color),
+          }),
+        }
+      : undefined;
+    return {
+      id: Number(x.id),
+      texto: String(x.texto ?? ''),
+      interno: Boolean(x.interno),
+      fechaCreacion: fechaCreacion ?? '',
+      autor,
+    } as Comentario;
+  });
+}
+
+/** Convierte created_at del backend a string ISO para mostrar bien la fecha (evita "ahora mismo" erróneo). */
+function toIsoDateString(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  if (typeof value === 'number') {
+    // Backend puede enviar segundos (TypeORM) o milisegundos
+    const ms = value < 1e12 ? value * 1000 : value;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  if (typeof value === 'object' && 'toISOString' in (value as Date)) return (value as Date).toISOString();
+  return null;
+}
 import { EstadoBadge, PrioridadBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -45,15 +103,14 @@ export default function TicketDetailPage() {
   const canChangeEstado = user?.rol && ROLES_CAN_CHANGE_ESTADO.includes(user.rol);
   const isTecnico = user?.rol && ROLES_TECNICOS.includes(user.rol);
   // Backend puede devolver asignadoAId y/o asignadoA.id
-  const isAsignadoAMi =
-    ticket && user?.id && (ticket.asignadoAId === user.id || ticket.asignadoA?.id === user.id);
+  const isAsignadoAMi = ticket && user?.id && (ticket.asignadoAId === user.id || ticket.asignadoA?.id === user.id);
   const tecnicoNoAutorizado = isTecnico && ticket && !isAsignadoAMi;
 
   const load = async () => {
     try {
       const [tRes, cRes] = await Promise.all([ticketsApi.get(Number(id)), ticketsApi.comentarios(Number(id))]);
       setTicket(tRes.data.data);
-      setComentarios(cRes.data.data ?? []);
+      setComentarios(normalizeComentarios(cRes.data));
     } catch {
       // Use mock
       setTicket(MOCK_TICKET);
@@ -202,7 +259,7 @@ export default function TicketDetailPage() {
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             {!editing && <PrioridadBadge prioridad={ticket.prioridad as never} />}
             {/* Estado: admin/operario siempre; técnicos solo en tickets asignados a ellos */}
-            {(canChangeEstado || (isTecnico && isAsignadoAMi)) ? (
+            {canChangeEstado || (isTecnico && isAsignadoAMi) ? (
               <Select value={ticket.estado} onValueChange={handleChangeEstado}>
                 <SelectTrigger className="w-36 h-8 text-xs">
                   <SelectValue placeholder="Estado" />

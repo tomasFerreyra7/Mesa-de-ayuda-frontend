@@ -17,22 +17,24 @@ export function formatDate(date: string | Date, format = 'dd/MM/yyyy') {
   return format.replace('dd', day).replace('MM', month).replace('yyyy', year.toString()).replace('HH', hours).replace('mm', minutes);
 }
 
+/**
+ * Si pasaron menos de 24 h: muestra tiempo relativo (ej. "hace 15 min", "hace 2 h").
+ * Si pasaron 24 h o más: muestra fecha y hora (ej. "16/03/2025 14:30") a partir de createdAt.
+ */
 export function formatRelative(date: string | Date | null | undefined): string {
-  if (date == null) return '—';
+  if (date == null || (typeof date === 'string' && date.trim() === '')) return '—';
   const d = typeof date === 'string' ? new Date(date) : date;
   const time = d.getTime();
   if (Number.isNaN(time)) return '—';
-  const now = new Date();
-  const diffMs = now.getTime() - time;
+  const now = Date.now();
+  const diffMs = now - time;
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
 
   if (diffMins < 1) return 'ahora mismo';
-  if (diffMins < 60) return `hace ${diffMins}m`;
-  if (diffHours < 24) return `hace ${diffHours}h`;
-  if (diffDays < 7) return `hace ${diffDays}d`;
-  return formatDate(d);
+  if (diffMins < 60) return `hace ${diffMins} min`;
+  if (diffHours < 24) return `hace ${diffHours} h`;
+  return formatDate(d, 'dd/MM/yyyy HH:mm');
 }
 
 export function getSLAStatus(slaVenceEn: string | null, estado: string): 'ok' | 'warning' | 'overdue' | 'resolved' {

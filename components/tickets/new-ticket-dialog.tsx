@@ -86,10 +86,16 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
             { id: 5, nombre: 'Secretaría General' },
           ]);
         });
+      // Backend puede rechazar per_page alto (400); usar 50 y, si falla, intentar sin params
       equiposApi
-        .list({ per_page: 200, page: 1 })
+        .list({ per_page: 50, page: 1 })
         .then((res) => setEquipos(res.data.data ?? []))
-        .catch(() => setEquipos([]));
+        .catch(() => {
+          equiposApi
+            .list()
+            .then((res2) => setEquipos(res2.data.data ?? []))
+            .catch(() => setEquipos([]));
+        });
     }
   }, [open]);
 

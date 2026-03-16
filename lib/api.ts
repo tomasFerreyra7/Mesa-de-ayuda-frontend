@@ -20,12 +20,13 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: 401 → cerrar sesión en store + persist y redirigir a login
+// Response interceptor: 401 → cerrar sesión y redirigir a login (salvo si el 401 viene del propio login = credenciales incorrectas)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      if (typeof window !== 'undefined') {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      const isLoginRequest = error.config?.url?.includes('/auth/login') ?? false;
+      if (!isLoginRequest) {
         useAuthStore.getState().logout();
         window.location.href = '/login';
       }
@@ -134,6 +135,18 @@ export const ubicacionesApi = {
   juzgados: (params?: { q?: string; distrito_id?: number }) => api.get('/ubicaciones/juzgados', { params }),
   juzgado: (id: number) => api.get(`/ubicaciones/juzgados/${id}`),
   puestos: (juzgadoId: number) => api.get(`/ubicaciones/juzgados/${juzgadoId}/puestos`),
+  createCircunscripcion: (data: CreateCircunscripcionDto) => api.post('/ubicaciones/circunscripciones', data),
+  updateCircunscripcion: (id: number, data: UpdateCircunscripcionDto) => api.patch(`/ubicaciones/circunscripciones/${id}`, data),
+  deleteCircunscripcion: (id: number) => api.delete(`/ubicaciones/circunscripciones/${id}`),
+  createDistrito: (data: CreateDistritoDto) => api.post('/ubicaciones/distritos', data),
+  updateDistrito: (id: number, data: UpdateDistritoDto) => api.patch(`/ubicaciones/distritos/${id}`, data),
+  deleteDistrito: (id: number) => api.delete(`/ubicaciones/distritos/${id}`),
+  createJuzgado: (data: CreateJuzgadoDto) => api.post('/ubicaciones/juzgados', data),
+  updateJuzgado: (id: number, data: UpdateJuzgadoDto) => api.patch(`/ubicaciones/juzgados/${id}`, data),
+  deleteJuzgado: (id: number) => api.delete(`/ubicaciones/juzgados/${id}`),
+  createPuesto: (juzgadoId: number, data: CreatePuestoDto) => api.post(`/ubicaciones/juzgados/${juzgadoId}/puestos`, data),
+  updatePuesto: (juzgadoId: number, puestoId: number, data: UpdatePuestoDto) => api.patch(`/ubicaciones/juzgados/${juzgadoId}/puestos/${puestoId}`, data),
+  deletePuesto: (juzgadoId: number, puestoId: number) => api.delete(`/ubicaciones/juzgados/${juzgadoId}/puestos/${puestoId}`),
 };
 
 // Usuarios
@@ -216,42 +229,56 @@ export interface Ticket {
 
 export interface Equipo {
   id: number;
-  nro_inventario: string;
+  // Soportar tanto snake_case como camelCase desde el backend
+  nro_inventario?: string;
+  nroInventario?: string;
   clase: string;
   subtipo?: string;
   marca?: string;
   modelo?: string;
   nro_serie?: string;
+  nroSerie?: string;
   estado: 'Activo' | 'Inactivo' | 'En Mantenimiento' | 'Dado de Baja';
   puesto?: { id: number; numero: string; juzgado: { id: number; nombre: string } };
   fecha_alta?: string;
+  fechaAlta?: string;
   observaciones?: string;
   activo: boolean;
 }
 
 export interface Software {
   id: number;
+  // Soportar tanto snake_case como camelCase desde el backend
   nro_sw?: string;
+  nroSw?: string;
   nombre: string;
   version?: string;
   tipo: string;
   proveedor?: string;
+  // Soportar variantes de nombre para compatibilidad con backend
   tipo_licencia?: string;
+  tipoLicencia?: string;
   max_instalaciones?: number;
+  maxInstalaciones?: number;
   instalaciones_actuales?: number;
+  instalacionesAct?: number;
   estado: string;
   fecha_vencimiento?: string;
+  fechaVencimiento?: string;
+  observaciones?: string;
   activo: boolean;
 }
 
 export interface Contrato {
   id: number;
-  nro_contrato: string;
+  nro_contrato?: string;
+  nroContrato?: string;
   proveedor?: { id: number; nombre: string };
   tipo: string;
   descripcion?: string;
-  fecha_inicio: string;
-  fecha_venc: string;
+  fecha_inicio?: string;
+  fecha_venc?: string;
+  fechaVenc?: string;
   monto?: number;
   moneda?: string;
   estado: string;
@@ -280,11 +307,13 @@ export interface Notificacion {
   fechaCreacion: string;
 }
 
+/** Comentario de ticket. Backend (TicketComentario) devuelve: id, ticket_id, usuario_id, texto, interno, created_at, usuario (relación). */
 export interface Comentario {
   id: number;
   texto: string;
   interno: boolean;
-  autor: User;
+  /** En backend viene como `usuario`; se normaliza a `autor` en el frontend. */
+  autor?: User;
   fechaCreacion: string;
 }
 
@@ -356,6 +385,7 @@ export interface CreateContratoDto {
   fecha_venc: string;
   monto?: number;
   moneda?: string;
+  observaciones?: string;
 }
 
 export interface CreateProveedorDto {
@@ -374,5 +404,57 @@ export interface CreateUsuarioDto {
   rol: string;
   avatarColor?: string;
   juzgadoIds?: number[];
+}
+
+export interface CreateCircunscripcionDto {
+  codigo: string;
+  nombre: string;
+  descripcion?: string;
+}
+
+export interface CreateDistritoDto {
+  circunscripcion_id: number;
+  codigo: string;
+  nombre: string;
+  edificio?: string;
+  direccion?: string;
+}
+
+export interface CreateJuzgadoDto {
+  distrito_id: number;
+  codigo: string;
+  nombre: string;
+  tipo?: string;
+  piso?: string;
+}
+
+export interface CreatePuestoDto {
+  numero: number;
+  descripcion?: string;
+}
+
+export interface UpdateCircunscripcionDto {
+  nombre?: string;
+  descripcion?: string;
+  activo?: boolean;
+}
+
+export interface UpdateDistritoDto {
+  nombre?: string;
+  edificio?: string;
+  direccion?: string;
+  activo?: boolean;
+}
+
+export interface UpdateJuzgadoDto {
+  nombre?: string;
+  piso?: string;
+  activo?: boolean;
+}
+
+export interface UpdatePuestoDto {
+  numero?: number;
+  descripcion?: string;
+  activo?: boolean;
 }
 

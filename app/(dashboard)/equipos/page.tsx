@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, RefreshCw, Pencil } from 'lucide-react';
+import { Plus, Search, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
-import { equiposApi } from '@/lib/api';
+import { equiposApi, ubicacionesApi } from '@/lib/api';
 import type { Equipo, EquipoFilters, PaginationMeta } from '@/lib/api';
 import { DataTable } from '@/components/ui/data-table';
 import { EquipoEstadoBadge } from '@/components/ui/badge';
@@ -39,8 +39,22 @@ export default function EquiposPage() {
   const [filters, setFilters] = useState<EquipoFilters>({ page: 1, per_page: 20 });
   const [search, setSearch] = useState('');
   const [editEquipo, setEditEquipo] = useState<Equipo | null>(null);
+  const [creatingEquipo, setCreatingEquipo] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [editForm, setEditForm] = useState({ clase: '', subtipo: '', marca: '', modelo: '', estado: '', observaciones: '' });
+  const [puestosOptions, setPuestosOptions] = useState<{ id: number; label: string }[]>([]);
+  const [loadingPuestos, setLoadingPuestos] = useState(false);
+  const [editForm, setEditForm] = useState({
+    nro_inventario: '',
+    clase: '',
+    subtipo: '',
+    marca: '',
+    modelo: '',
+    nro_serie: '',
+    estado: '',
+    puesto_id: '' as string,
+    fecha_alta: '',
+    observaciones: '',
+  });
 
   const load = useCallback(async (f: EquipoFilters) => {
     setLoading(true);
@@ -60,33 +74,100 @@ export default function EquiposPage() {
     load(filters);
   }, [filters, load]);
 
+  // Cargar puestos (juzgado + número) para el Select al abrir el modal de crear/editar
+  useEffect(() => {
+    if (!editEquipo && !creatingEquipo) return;
+    setLoadingPuestos(true);
+    ubicacionesApi
+      .juzgados()
+      .then((jRes) => {
+        const raw = jRes.data as { data?: unknown[]; [k: string]: unknown };
+        const juzgados = (raw?.data ?? raw) as { id: number; nombre?: string; codigo?: string }[];
+        if (!Array.isArray(juzgados) || juzgados.length === 0) {
+          setPuestosOptions([]);
+          return;
+        }
+        return Promise.all(
+          juzgados.map((j) =>
+            ubicacionesApi.puestos(j.id).then((pRes) => {
+              const pr = pRes.data as { data?: unknown[]; [k: string]: unknown };
+              const puestos = (pr?.data ?? pr) as { id: number; numero?: number | string; descripcion?: string }[];
+              const nombreJuzgado = j.nombre ?? j.codigo ?? `Juzgado ${j.id}`;
+              return (Array.isArray(puestos) ? puestos : []).map((p) => ({
+                id: p.id,
+                label: `${nombreJuzgado} — Puesto ${p.numero ?? p.id}`,
+              }));
+            }),
+          ),
+        );
+      })
+      .then((arrays) => {
+        if (!arrays) return;
+        setPuestosOptions(arrays.flat());
+      })
+      .catch(() => setPuestosOptions([]))
+      .finally(() => setLoadingPuestos(false));
+  }, [editEquipo, creatingEquipo]);
+
   const openEdit = (e: Equipo) => {
     setEditEquipo(e);
+    setCreatingEquipo(false);
     setEditForm({
+      nro_inventario: e.nro_inventario ?? e.nroInventario ?? '',
       clase: e.clase,
       subtipo: e.subtipo ?? '',
       marca: e.marca ?? '',
       modelo: e.modelo ?? '',
+      nro_serie: e.nro_serie ?? e.nroSerie ?? '',
       estado: e.estado,
+      puesto_id: e.puesto?.id != null ? String(e.puesto.id) : '',
+      fecha_alta: e.fecha_alta ?? e.fechaAlta ?? '',
       observaciones: e.observaciones ?? '',
     });
   };
 
   const handleSaveEquipo = async () => {
-    if (!editEquipo) return;
+    if (!creatingEquipo && !editEquipo) return;
+
+    if (!editForm.nro_inventario || !editForm.clase) {
+      toast.error('Nro. inventario y clase son obligatorios');
+      return;
+    }
+
     setSaving(true);
     try {
-      await equiposApi.update(editEquipo.id, {
-        nro_inventario: editEquipo.nro_inventario,
-        clase: editForm.clase,
-        subtipo: editForm.subtipo || undefined,
-        marca: editForm.marca || undefined,
-        modelo: editForm.modelo || undefined,
-        estado: editForm.estado,
-        observaciones: editForm.observaciones || undefined,
-      });
-      toast.success('Equipo actualizado');
+      if (creatingEquipo) {
+        const createPayload = {
+          nro_inventario: editForm.nro_inventario,
+          clase: editForm.clase,
+          subtipo: editForm.subtipo || undefined,
+          marca: editForm.marca || undefined,
+          modelo: editForm.modelo || undefined,
+          nro_serie: editForm.nro_serie || undefined,
+          estado: editForm.estado || 'Activo',
+          puesto_id: editForm.puesto_id !== '' ? Number(editForm.puesto_id) : undefined,
+          fecha_alta: editForm.fecha_alta || undefined,
+          observaciones: editForm.observaciones || undefined,
+        };
+        await equiposApi.create(createPayload);
+        toast.success('Equipo creado');
+      } else if (editEquipo) {
+        // PATCH no debe enviar nro_inventario ni fecha_alta (el backend no los permite en update)
+        const updatePayload = {
+          clase: editForm.clase,
+          subtipo: editForm.subtipo || undefined,
+          marca: editForm.marca || undefined,
+          modelo: editForm.modelo || undefined,
+          nro_serie: editForm.nro_serie || undefined,
+          estado: editForm.estado || undefined,
+          puesto_id: editForm.puesto_id !== '' ? Number(editForm.puesto_id) : undefined,
+          observaciones: editForm.observaciones || undefined,
+        };
+        await equiposApi.update(editEquipo.id, updatePayload);
+        toast.success('Equipo actualizado');
+      }
       setEditEquipo(null);
+      setCreatingEquipo(false);
       load(filters);
     } catch {
       toast.error('Error al guardar');
@@ -100,7 +181,11 @@ export default function EquiposPage() {
       accessorKey: 'nro_inventario',
       header: 'Nro. Inventario',
       size: 130,
-      cell: ({ row }) => <span className="font-mono text-xs font-medium text-foreground">{row.original.nro_inventario}</span>,
+      cell: ({ row }) => {
+        const e = row.original;
+        const nro = e.nro_inventario ?? e.nroInventario;
+        return <span className="font-mono text-xs text-muted-foreground">{nro ?? '—'}</span>;
+      },
     },
     {
       accessorKey: 'clase',
@@ -148,26 +233,50 @@ export default function EquiposPage() {
       accessorKey: 'fecha_alta',
       header: 'Alta',
       size: 100,
-      cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.fecha_alta ? formatDate(row.original.fecha_alta) : '—'}</span>,
+      cell: ({ row }) => {
+        const e = row.original;
+        const fecha = e.fecha_alta ?? e.fechaAlta;
+        return <span className="text-xs text-muted-foreground">{fecha ? formatDate(fecha) : '—'}</span>;
+      },
     },
     ...(canEdit
       ? [
           {
             id: 'acciones',
             header: '',
-            size: 60,
+            size: 100,
             cell: ({ row }: { row: { original: Equipo } }) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openEdit(row.original);
-                }}
-              >
-                <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(row.original);
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm('¿Dar de baja este equipo? (soft delete)')) return;
+                    try {
+                      await equiposApi.delete(row.original.id);
+                      toast.success('Equipo dado de baja');
+                      load(filters);
+                    } catch {
+                      toast.error('Error al eliminar');
+                    }
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             ),
           } as ColumnDef<Equipo>,
         ]
@@ -179,7 +288,7 @@ export default function EquiposPage() {
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
@@ -229,7 +338,25 @@ export default function EquiposPage() {
               {meta.total} equipo{meta.total !== 1 ? 's' : ''}
             </span>
           )}
-          <Button size="sm">
+          <Button
+            size="sm"
+            onClick={() => {
+              setCreatingEquipo(true);
+              setEditEquipo(null);
+              setEditForm({
+                nro_inventario: '',
+                clase: '',
+                subtipo: '',
+                marca: '',
+                modelo: '',
+                nro_serie: '',
+                estado: 'Activo',
+                puesto_id: '',
+                fecha_alta: '',
+                observaciones: '',
+              });
+            }}
+          >
             <Plus className="w-4 h-4" />
             Nuevo Equipo
           </Button>
@@ -245,20 +372,51 @@ export default function EquiposPage() {
         emptyMessage="No se encontraron equipos"
       />
 
-      <Dialog open={!!editEquipo} onOpenChange={(open) => !open && setEditEquipo(null)}>
+      <Dialog
+        open={!!editEquipo || creatingEquipo}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditEquipo(null);
+            setCreatingEquipo(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg p-0">
           <div className="px-6 py-5 border-b border-border">
-            <h3 className="text-base font-semibold text-foreground">Editar equipo</h3>
-            {editEquipo && <p className="text-sm text-muted-foreground font-mono mt-1">{editEquipo.nro_inventario}</p>}
+            <h3 className="text-base font-semibold text-foreground">{creatingEquipo ? 'Nuevo equipo' : 'Editar equipo'}</h3>
           </div>
-          {editEquipo && (
-            <div className="px-6 py-5 space-y-5">
+          {(editEquipo || creatingEquipo) && (
+            <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Clase</label>
+                  <label className="text-sm font-medium text-foreground">
+                    Nro. Inventario <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={editForm.nro_inventario}
+                    onChange={(e) => setEditForm((f) => ({ ...f, nro_inventario: e.target.value }))}
+                    className="h-9 text-sm font-mono"
+                    placeholder="Texto"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Nro. serie</label>
+                  <Input
+                    value={editForm.nro_serie}
+                    onChange={(e) => setEditForm((f) => ({ ...f, nro_serie: e.target.value }))}
+                    className="h-9 text-sm font-mono"
+                    placeholder="Texto"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Clase <span className="text-destructive">*</span>
+                  </label>
                   <Select value={editForm.clase} onValueChange={(v) => setEditForm((f) => ({ ...f, clase: v }))}>
                     <SelectTrigger className="h-9 text-sm">
-                      <SelectValue />
+                      <SelectValue placeholder="Seleccionar" />
                     </SelectTrigger>
                     <SelectContent>
                       {CLASES.filter((c) => c !== ALL_FILTER).map((c) => (
@@ -288,20 +446,71 @@ export default function EquiposPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Marca</label>
-                  <Input value={editForm.marca} onChange={(e) => setEditForm((f) => ({ ...f, marca: e.target.value }))} className="h-9 text-sm" />
+                  <Input
+                    value={editForm.marca}
+                    onChange={(e) => setEditForm((f) => ({ ...f, marca: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Texto"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Modelo</label>
-                  <Input value={editForm.modelo} onChange={(e) => setEditForm((f) => ({ ...f, modelo: e.target.value }))} className="h-9 text-sm" />
+                  <Input
+                    value={editForm.modelo}
+                    onChange={(e) => setEditForm((f) => ({ ...f, modelo: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Texto"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Subtipo</label>
+                  <Input
+                    value={editForm.subtipo}
+                    onChange={(e) => setEditForm((f) => ({ ...f, subtipo: e.target.value }))}
+                    className="h-9 text-sm"
+                    placeholder="Texto"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Puesto</label>
+                  <Select
+                    value={editForm.puesto_id || '__none__'}
+                    onValueChange={(v) => setEditForm((f) => ({ ...f, puesto_id: v === '__none__' ? '' : v }))}
+                    disabled={loadingPuestos}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder={loadingPuestos ? 'Cargando puestos…' : 'Sin asignar'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Sin asignar</SelectItem>
+                      {puestosOptions.map((opt) => (
+                        <SelectItem key={opt.id} value={String(opt.id)}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Subtipo</label>
-                <Input value={editForm.subtipo} onChange={(e) => setEditForm((f) => ({ ...f, subtipo: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">Fecha alta</label>
+                <Input
+                  type="date"
+                  value={editForm.fecha_alta}
+                  onChange={(e) => setEditForm((f) => ({ ...f, fecha_alta: e.target.value }))}
+                  className="h-9 text-sm"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Observaciones</label>
-                <Input value={editForm.observaciones} onChange={(e) => setEditForm((f) => ({ ...f, observaciones: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  value={editForm.observaciones}
+                  onChange={(e) => setEditForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  className="h-9 text-sm"
+                  placeholder="Texto"
+                />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <DialogClose asChild>

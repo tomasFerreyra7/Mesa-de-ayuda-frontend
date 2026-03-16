@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Search, Shield, UserCheck, Wrench, Package } from 'lucide-react';
+import { Plus, Search, Shield, UserCheck, Wrench, Package, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
 import { usuariosApi } from '@/lib/api';
@@ -13,7 +13,10 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getInitials, cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth.store';
 import { toast } from 'sonner';
+
+const ROLES_CAN_EDIT_USUARIOS = ['admin'];
 
 const ROLES_OPTIONS = [
   { value: 'admin', label: 'Admin' },
@@ -84,14 +87,39 @@ const columns: ColumnDef<User>[] = [
   },
 ];
 
+function useColumnsWithActions(canEdit: boolean, onEdit: (u: User) => void, onDelete: (u: User) => void): ColumnDef<User>[] {
+  if (!canEdit) return columns;
+  return [
+    ...columns,
+    {
+      id: 'acciones',
+      header: '',
+      size: 100,
+      cell: ({ row }: { row: { original: User } }) => (
+        <div className="flex items-center gap-0.5">
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(row.original)}>
+            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => onDelete(row.original)}>
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+}
+
 export default function UsuariosPage() {
+  const user = useAuthStore((s) => s.user);
+  const canEdit = Boolean(user?.rol && ROLES_CAN_EDIT_USUARIOS.includes(user.rol));
   const [users, setUsers] = useState<User[]>([]);
   const [meta, setMeta] = useState<PaginationMeta>();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [showNewUser, setShowNewUser] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editUser, setEditUser] = useState<User | null>(null);
   const [saving, setSaving] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({
+  const [userForm, setUserForm] = useState({
     nombre: '',
     email: '',
     password: '',
@@ -117,35 +145,83 @@ export default function UsuariosPage() {
     load();
   }, []);
 
-  const handleCreateUser = async (e: React.FormEvent) => {
+  const openNewUser = () => {
+    setEditUser(null);
+    setUserForm({ nombre: '', email: '', password: '', iniciales: '', rol: 'operario' });
+    setShowModal(true);
+  };
+
+  const openEditUser = (u: User) => {
+    setEditUser(u);
+    setUserForm({
+      nombre: u.nombre,
+      email: u.email,
+      password: '',
+      iniciales: u.iniciales ?? '',
+      rol: u.rol,
+    });
+    setShowModal(true);
+  };
+
+  const handleDeleteUser = async (u: User) => {
+    if (!window.confirm(`¿Dar de baja al usuario "${u.nombre}"? (soft delete)`)) return;
+    try {
+      await usuariosApi.delete(u.id);
+      toast.success('Usuario dado de baja');
+      load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(typeof msg === 'string' ? msg : 'Error al eliminar');
+    }
+  };
+
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserForm.nombre.trim() || !newUserForm.email.trim() || !newUserForm.password.trim()) {
-      toast.error('Completá nombre, email y contraseña');
+    if (!userForm.nombre.trim() || !userForm.email.trim()) {
+      toast.error('Nombre y email son obligatorios');
       return;
     }
-    if (newUserForm.password.length < 6) {
+    if (!editUser && !userForm.password.trim()) {
+      toast.error('La contraseña es obligatoria para nuevo usuario');
+      return;
+    }
+    if (userForm.password && userForm.password.length < 6) {
       toast.error('La contraseña debe tener al menos 6 caracteres');
       return;
     }
     setSaving(true);
     try {
-      await usuariosApi.create({
-        nombre: newUserForm.nombre.trim(),
-        email: newUserForm.email.trim(),
-        password: newUserForm.password,
-        rol: newUserForm.rol,
-        iniciales: newUserForm.iniciales.trim() || undefined,
-      });
-      toast.success('Usuario creado correctamente');
-      setShowNewUser(false);
-      setNewUserForm({ nombre: '', email: '', password: '', iniciales: '', rol: 'operario' });
+      if (editUser) {
+        await usuariosApi.update(editUser.id, {
+          nombre: userForm.nombre.trim(),
+          email: userForm.email.trim(),
+          rol: userForm.rol,
+          iniciales: userForm.iniciales.trim() || undefined,
+          ...(userForm.password.trim() ? { password: userForm.password } : {}),
+        });
+        toast.success('Usuario actualizado');
+      } else {
+        await usuariosApi.create({
+          nombre: userForm.nombre.trim(),
+          email: userForm.email.trim(),
+          password: userForm.password,
+          rol: userForm.rol,
+          iniciales: userForm.iniciales.trim() || undefined,
+        });
+        toast.success('Usuario creado correctamente');
+      }
+      setShowModal(false);
+      setEditUser(null);
+      setUserForm({ nombre: '', email: '', password: '', iniciales: '', rol: 'operario' });
       load();
     } catch {
-      toast.error('Error al crear el usuario');
+      toast.error(editUser ? 'Error al actualizar' : 'Error al crear el usuario');
     } finally {
       setSaving(false);
     }
   };
+
+  const columnsToShow = useColumnsWithActions(canEdit, openEditUser, handleDeleteUser);
 
   const filtered = search
     ? users.filter((u) => u.nombre.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
@@ -153,31 +229,39 @@ export default function UsuariosPage() {
 
   return (
     <div className="space-y-4">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
+      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar usuarios…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
         </div>
         <div className="ml-auto">
-          <Button size="sm" onClick={() => setShowNewUser(true)}>
-            <Plus className="w-4 h-4" /> Nuevo Usuario
-          </Button>
+          {canEdit && (
+            <Button size="sm" onClick={openNewUser}>
+              <Plus className="w-4 h-4" /> Nuevo Usuario
+            </Button>
+          )}
         </div>
       </motion.div>
 
-      <DataTable data={filtered} columns={columns} meta={meta} isLoading={loading} emptyMessage="No se encontraron usuarios" />
+      <DataTable data={filtered} columns={columnsToShow} meta={meta} isLoading={loading} emptyMessage="No se encontraron usuarios" />
 
-      <Dialog open={showNewUser} onOpenChange={setShowNewUser}>
+      <Dialog
+        open={showModal}
+        onOpenChange={(open) => {
+          if (!open) setEditUser(null);
+          setShowModal(open);
+        }}
+      >
         <DialogContent className="max-w-lg p-0">
           <div className="px-6 py-5 border-b border-border">
-            <h3 className="text-base font-semibold text-foreground">Nuevo usuario</h3>
+            <h3 className="text-base font-semibold text-foreground">{editUser ? 'Editar usuario' : 'Nuevo usuario'}</h3>
           </div>
-          <form onSubmit={handleCreateUser} className="px-6 py-5 space-y-5">
+          <form onSubmit={handleSaveUser} className="px-6 py-5 space-y-5">
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Nombre *</label>
               <Input
-                value={newUserForm.nombre}
-                onChange={(e) => setNewUserForm((f) => ({ ...f, nombre: e.target.value }))}
+                value={userForm.nombre}
+                onChange={(e) => setUserForm((f) => ({ ...f, nombre: e.target.value }))}
                 placeholder="Nombre completo"
                 className="h-9 text-sm"
                 required
@@ -187,37 +271,37 @@ export default function UsuariosPage() {
               <label className="text-sm font-medium text-foreground">Email *</label>
               <Input
                 type="email"
-                value={newUserForm.email}
-                onChange={(e) => setNewUserForm((f) => ({ ...f, email: e.target.value }))}
+                value={userForm.email}
+                onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))}
                 placeholder="usuario@ejemplo.gob.ar"
                 className="h-9 text-sm"
                 required
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Contraseña *</label>
+              <label className="text-sm font-medium text-foreground">{editUser ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
               <Input
                 type="password"
-                value={newUserForm.password}
-                onChange={(e) => setNewUserForm((f) => ({ ...f, password: e.target.value }))}
-                placeholder="Mínimo 6 caracteres"
+                value={userForm.password}
+                onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))}
+                placeholder={editUser ? 'Opcional' : 'Mínimo 6 caracteres'}
                 className="h-9 text-sm"
-                minLength={6}
-                required
+                minLength={editUser ? undefined : 6}
+                required={!editUser}
               />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Iniciales</label>
               <Input
-                value={newUserForm.iniciales}
-                onChange={(e) => setNewUserForm((f) => ({ ...f, iniciales: e.target.value.toUpperCase().slice(0, 4) }))}
+                value={userForm.iniciales}
+                onChange={(e) => setUserForm((f) => ({ ...f, iniciales: e.target.value.toUpperCase().slice(0, 4) }))}
                 placeholder="Ej: MG"
                 className="h-9 text-sm max-w-[80px]"
               />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Rol *</label>
-              <Select value={newUserForm.rol} onValueChange={(v) => setNewUserForm((f) => ({ ...f, rol: v }))}>
+              <Select value={userForm.rol} onValueChange={(v) => setUserForm((f) => ({ ...f, rol: v }))}>
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -237,7 +321,7 @@ export default function UsuariosPage() {
                 </Button>
               </DialogClose>
               <Button type="submit" size="sm" loading={saving}>
-                Crear usuario
+                {editUser ? 'Guardar' : 'Crear usuario'}
               </Button>
             </div>
           </form>
