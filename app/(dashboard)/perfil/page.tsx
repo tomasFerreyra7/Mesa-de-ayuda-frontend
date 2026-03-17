@@ -87,7 +87,7 @@ export default function PerfilPage() {
 
         <form onSubmit={handleSubmit(onSubmitPassword)} className="px-6 py-4 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Contraseña actual</label>
+            <label className="text-sm font-medium text-foreground">Contraseña actual <span className="text-destructive">*</span></label>
             <Input
               {...register("password_actual")}
               type="password"
@@ -98,7 +98,7 @@ export default function PerfilPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Nueva contraseña</label>
+            <label className="text-sm font-medium text-foreground">Nueva contraseña <span className="text-destructive">*</span></label>
             <Input
               {...register("password_nuevo")}
               type="password"
@@ -109,7 +109,7 @@ export default function PerfilPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Confirmar nueva contraseña</label>
+            <label className="text-sm font-medium text-foreground">Confirmar nueva contraseña <span className="text-destructive">*</span></label>
             <Input
               {...register("password_confirmar")}
               type="password"

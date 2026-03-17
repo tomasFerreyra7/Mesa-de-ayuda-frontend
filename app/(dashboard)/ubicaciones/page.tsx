@@ -84,10 +84,11 @@ export default function UbicacionesPage() {
 
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<{
-    type: 'circunscripcion' | 'distrito' | 'juzgado';
+    type: 'circunscripcion' | 'distrito' | 'juzgado' | 'puesto';
     id: number;
     distritoId?: number;
     circunscripcionId?: number;
+    juzgadoId?: number;
   } | null>(null);
   const [tipoUbicacion, setTipoUbicacion] = useState<UbicacionTipo>('circunscripcion');
   const [saving, setSaving] = useState(false);
@@ -236,6 +237,41 @@ export default function UbicacionesPage() {
       numero: '',
     });
     setShowModal(true);
+  };
+
+  const openEditPuesto = (p: Puesto, juzgadoId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditTarget({ type: 'puesto', id: p.id, juzgadoId });
+    setTipoUbicacion('puesto');
+    setForm({
+      codigo: '',
+      nombre: '',
+      descripcion: p.descripcion ?? '',
+      circunscripcion_id: '',
+      edificio: '',
+      direccion: '',
+      distrito_id: '',
+      tipo: '',
+      piso: '',
+      juzgado_id: String(juzgadoId),
+      numero: String(p.numero ?? ''),
+    });
+    setShowModal(true);
+  };
+
+  const handleDeletePuesto = async (puestoId: number, juzgadoId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('¿Dar de baja este puesto? (soft delete)')) return;
+    try {
+      await ubicacionesApi.deletePuesto(juzgadoId, puestoId);
+      toast.success('Puesto dado de baja');
+      setPuestosByJuzgado((prev) => ({
+        ...prev,
+        [juzgadoId]: (prev[juzgadoId] ?? []).filter((p) => p.id !== puestoId),
+      }));
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
   };
 
   const handleDeleteCircunscripcion = async (id: number, e: React.MouseEvent) => {
@@ -408,13 +444,36 @@ export default function UbicacionesPage() {
       }
       setSaving(true);
       try {
-        await ubicacionesApi.createPuesto(Number(form.juzgado_id), {
-          numero: num,
-          descripcion: form.descripcion.trim() || undefined,
-        });
-        toast.success('Puesto creado');
+        if (editTarget?.type === 'puesto' && editTarget.juzgadoId != null) {
+          await ubicacionesApi.updatePuesto(editTarget.juzgadoId, editTarget.id, {
+            numero: num,
+            descripcion: form.descripcion.trim() || undefined,
+          });
+          toast.success('Puesto actualizado');
+          setEditTarget(null);
+        } else {
+          await ubicacionesApi.createPuesto(Number(form.juzgado_id), {
+            numero: num,
+            descripcion: form.descripcion.trim() || undefined,
+          });
+          toast.success('Puesto creado');
+        }
         setShowModal(false);
-        loadTree();
+        // Recargar lista de puestos del juzgado afectado
+        const juzgadoId = editTarget?.type === 'puesto' && editTarget.juzgadoId != null ? editTarget.juzgadoId : Number(form.juzgado_id);
+        if (!Number.isNaN(juzgadoId)) {
+          try {
+            const res = await ubicacionesApi.puestos(juzgadoId);
+            const data = res.data?.data ?? res.data ?? [];
+            const list = Array.isArray(data) ? (data as Puesto[]) : [];
+            setPuestosByJuzgado((prev) => ({ ...prev, [juzgadoId]: list }));
+          } catch {
+            // si falla, al menos recargamos todo el árbol
+            loadTree();
+          }
+        } else {
+          loadTree();
+        }
       } catch (err) {
         toast.error(getErrorMessage(err));
       } finally {
@@ -493,7 +552,9 @@ export default function UbicacionesPage() {
                   ? 'Editar circunscripción'
                   : editTarget.type === 'distrito'
                     ? 'Editar distrito'
-                    : 'Editar juzgado'
+                    : editTarget.type === 'juzgado'
+                      ? 'Editar juzgado'
+                      : 'Editar puesto'
                 : 'Nueva ubicación'}
             </h3>
           </div>
@@ -684,7 +745,11 @@ export default function UbicacionesPage() {
                   <label className="text-sm font-medium text-foreground">
                     Juzgado <span className="text-destructive">*</span>
                   </label>
-                  <Select value={form.juzgado_id} onValueChange={(v) => setForm((f) => ({ ...f, juzgado_id: v }))}>
+                  <Select
+                    value={form.juzgado_id}
+                    onValueChange={(v) => setForm((f) => ({ ...f, juzgado_id: v }))}
+                    disabled={!!editTarget && editTarget.type === 'puesto'}
+                  >
                     <SelectTrigger className="h-9 text-sm">
                       <SelectValue placeholder="Seleccionar" />
                     </SelectTrigger>
@@ -877,8 +942,25 @@ export default function UbicacionesPage() {
                                           key={p.id}
                                           className="flex items-center gap-3 px-14 py-2 text-sm text-foreground border-b border-border/10 last:border-0"
                                         >
-                                          <span className="font-mono text-xs text-muted-foreground w-8">Nº {p.numero}</span>
-                                          <span className="text-muted-foreground">{p.descripcion ?? '—'}</span>
+                                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                                            <span className="font-mono text-xs text-muted-foreground w-8">Nº {p.numero}</span>
+                                            <span className="text-muted-foreground truncate">{p.descripcion ?? '—'}</span>
+                                          </div>
+                                          {isAdmin && (
+                                            <div className="flex items-center gap-0.5 shrink-0">
+                                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => openEditPuesto(p, j.id, e)}>
+                                                <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                                              </Button>
+                                              <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                                onClick={(e) => handleDeletePuesto(p.id, j.id, e)}
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </Button>
+                                            </div>
+                                          )}
                                         </li>
                                       ))}
                                     </ul>

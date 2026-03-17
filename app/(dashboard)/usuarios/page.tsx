@@ -258,7 +258,7 @@ export default function UsuariosPage() {
           </div>
           <form onSubmit={handleSaveUser} className="px-6 py-5 space-y-5">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Nombre *</label>
+              <label className="text-sm font-medium text-foreground">Nombre <span className="text-destructive">*</span></label>
               <Input
                 value={userForm.nombre}
                 onChange={(e) => setUserForm((f) => ({ ...f, nombre: e.target.value }))}
@@ -268,7 +268,7 @@ export default function UsuariosPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Email *</label>
+              <label className="text-sm font-medium text-foreground">Email <span className="text-destructive">*</span></label>
               <Input
                 type="email"
                 value={userForm.email}
@@ -279,7 +279,7 @@ export default function UsuariosPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">{editUser ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
+              <label className="text-sm font-medium text-foreground">{editUser ? 'Nueva contraseña (dejar en blanco para no cambiar)' : <>Contraseña <span className="text-destructive">*</span></>}</label>
               <Input
                 type="password"
                 value={userForm.password}
@@ -300,7 +300,7 @@ export default function UsuariosPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Rol *</label>
+              <label className="text-sm font-medium text-foreground">Rol <span className="text-destructive">*</span></label>
               <Select value={userForm.rol} onValueChange={(v) => setUserForm((f) => ({ ...f, rol: v }))}>
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />

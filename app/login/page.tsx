@@ -118,7 +118,7 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Email</label>
+              <label className="text-sm font-medium text-foreground">Email <span className="text-destructive">*</span></label>
               <input
                 {...register('email')}
                 type="email"
@@ -134,7 +134,7 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Contraseña</label>
+              <label className="text-sm font-medium text-foreground">Contraseña <span className="text-destructive">*</span></label>
               <div className="relative">
                 <input
                   {...register('password')}

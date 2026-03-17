@@ -245,7 +245,9 @@ export default function ProveedoresPage() {
           {(editItem || creatingProveedor) && (
             <div className="px-6 py-5 space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nombre *</label>
+                <label className="text-sm font-medium text-foreground">
+                  Nombre <span className="text-destructive">*</span>
+                </label>
                 <Input
                   value={editForm.nombre}
                   onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))}
@@ -271,6 +273,7 @@ export default function ProveedoresPage() {
                   onChange={(e) => setEditForm((f) => ({ ...f, telefono: e.target.value }))}
                   className="h-9 text-sm"
                   maxLength={50}
+                  placeholder="Máx. 50 caracteres"
                 />
               </div>
               <div className="space-y-2">
@@ -281,6 +284,7 @@ export default function ProveedoresPage() {
                   onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
                   className="h-9 text-sm"
                   maxLength={254}
+                  placeholder="usuario@proveedor.com"
                 />
               </div>
               <div className="space-y-2">
@@ -290,6 +294,7 @@ export default function ProveedoresPage() {
                   onChange={(e) => setEditForm((f) => ({ ...f, contacto: e.target.value }))}
                   className="h-9 text-sm"
                   maxLength={150}
+                  placeholder="Máx. 150 caracteres"
                 />
               </div>
               <div className="flex justify-end gap-3 pt-2">

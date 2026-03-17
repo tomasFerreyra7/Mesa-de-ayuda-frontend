@@ -204,7 +204,7 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">
-                Tipo <span className="text-danger">*</span>
+                Tipo <span className="text-destructive">*</span>
               </label>
               <Select value={tipo} onValueChange={(v) => setValue('tipo', v as FormData['tipo'])}>
                 <SelectTrigger error={!!errors.tipo}>
@@ -222,7 +222,7 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">
-                Prioridad <span className="text-danger">*</span>
+                Prioridad <span className="text-destructive">*</span>
               </label>
               <Select value={watch('prioridad')} onValueChange={(v) => setValue('prioridad', v as FormData['prioridad'])}>
                 <SelectTrigger error={!!errors.prioridad}>
@@ -247,7 +247,7 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
           {/* Asunto */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">
-              Asunto <span className="text-danger">*</span>
+              Asunto <span className="text-destructive">*</span>
             </label>
             <Input {...register('asunto')} placeholder={ph.asunto} error={!!errors.asunto} />
             {errors.asunto && <p className="text-xs text-danger">{errors.asunto.message}</p>}
@@ -262,7 +262,7 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
           {/* Juzgado */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">
-              Juzgado <span className="text-danger">*</span>
+              Juzgado <span className="text-destructive">*</span>
             </label>
             <Select value={watch('juzgado_id') ?? ''} onValueChange={(v) => setValue('juzgado_id', v)}>
               <SelectTrigger error={!!errors.juzgado_id}>
@@ -282,7 +282,7 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
           {/* Equipo (requerido por el backend) */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">
-              Equipo <span className="text-danger">*</span>
+              Equipo <span className="text-destructive">*</span>
             </label>
             <Select value={watch('equipo_id') ?? '__none__'} onValueChange={(v) => setValue('equipo_id', v)}>
               <SelectTrigger error={!!errors.equipo_id}>

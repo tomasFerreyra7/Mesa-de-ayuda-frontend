@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Plus, Search, RefreshCw, AlertCircle, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
-import { softwareApi } from '@/lib/api';
-import type { Software, PaginationMeta } from '@/lib/api';
+import { softwareApi, proveedoresApi } from '@/lib/api';
+import type { Software, PaginationMeta, Proveedor } from '@/lib/api';
 import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,11 +19,18 @@ import { toast } from 'sonner';
 const ROLES_CAN_EDIT = ['admin', 'operario'];
 const ROLES_TECNICOS = ['tecnico_interno', 'tecnico_proveedor'];
 
-// Valores permitidos por el backend para "tipo"
+// TipoSwEnum en backend
 const TIPOS_SOFTWARE = ['Sistema Operativo', 'Ofimatica', 'Seguridad', 'Gestion Judicial', 'Utilidades', 'Otro'];
 const LICENCIA_NONE = '__none__';
-// Enum de tipo de licencia (según valores usados en la app)
-const TIPOS_LICENCIA = ['Volumen', 'Suscripcion', 'OEM', 'Otro'];
+// Valores que acepta el backend para tipo_licencia (casing exacto)
+const TIPOS_LICENCIA = [
+  { value: 'OEM', label: 'OEM' },
+  { value: 'Volumen', label: 'Volumen' },
+  { value: 'Suscripcion', label: 'Suscripción' },
+  { value: 'Open Source', label: 'Open Source' },
+  { value: 'Freeware', label: 'Freeware' },
+  { value: 'Otro', label: 'Otro' },
+];
 
 const softwareEstadoStyle: Record<string, string> = {
   Activo: 'bg-success-light text-success border-success/20',
@@ -144,6 +151,7 @@ export default function SoftwarePage() {
   const [editItem, setEditItem] = useState<Software | null>(null);
   const [creatingSoftware, setCreatingSoftware] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [editForm, setEditForm] = useState({
     nombre: '',
     version: '',
@@ -174,6 +182,15 @@ export default function SoftwarePage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (creatingSoftware || editItem) {
+      proveedoresApi
+        .list()
+        .then((res) => setProveedores(res.data?.data ?? res.data ?? []))
+        .catch(() => setProveedores([]));
+    }
+  }, [creatingSoftware, editItem]);
+
   const openEdit = (s: Software) => {
     setEditItem(s);
     setCreatingSoftware(false);
@@ -200,25 +217,30 @@ export default function SoftwarePage() {
     }
     setSaving(true);
     try {
-      const basePayload = {
-        nombre: editForm.nombre,
-        version: editForm.version || undefined,
-        tipo: editForm.tipo,
-        proveedor: editForm.proveedor || undefined,
-        tipo_licencia: editForm.tipo_licencia || undefined,
-        max_instalaciones: editForm.max_instalaciones !== '' ? Number(editForm.max_instalaciones) : undefined,
-        fecha_vencimiento: editForm.fecha_vencimiento || undefined,
-        observaciones: editForm.observaciones || undefined,
-      };
       if (creatingSoftware) {
         await softwareApi.create({
-          ...basePayload,
+          nombre: editForm.nombre,
+          version: editForm.version || undefined,
+          tipo: editForm.tipo,
+          proveedor: editForm.proveedor || undefined,
+          tipo_licencia: editForm.tipo_licencia || undefined,
+          max_instalaciones: editForm.max_instalaciones !== '' ? Number(editForm.max_instalaciones) : undefined,
+          fecha_vencimiento: editForm.fecha_vencimiento || undefined,
+          observaciones: editForm.observaciones || undefined,
           nro_sw: editForm.nro_sw || undefined,
         });
         toast.success('Software creado');
       } else if (editItem) {
-        // El backend no permite actualizar nro_sw por PATCH
-        await softwareApi.update(editItem.id, basePayload);
+        // PATCH no permite proveedor ni nro_sw
+        await softwareApi.update(editItem.id, {
+          nombre: editForm.nombre,
+          version: editForm.version || undefined,
+          tipo: editForm.tipo,
+          tipo_licencia: editForm.tipo_licencia || undefined,
+          max_instalaciones: editForm.max_instalaciones !== '' ? Number(editForm.max_instalaciones) : undefined,
+          fecha_vencimiento: editForm.fecha_vencimiento || undefined,
+          observaciones: editForm.observaciones || undefined,
+        });
         toast.success('Software actualizado');
       }
       setEditItem(null);
@@ -366,7 +388,9 @@ export default function SoftwarePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Nro. Software</label>
+                  <label className="text-sm font-medium text-foreground">
+                  Nro. Software {creatingSoftware && <span className="text-destructive">*</span>}
+                </label>
                   <Input
                     value={editForm.nro_sw}
                     onChange={(e) => setEditForm((f) => ({ ...f, nro_sw: e.target.value }))}
@@ -393,14 +417,37 @@ export default function SoftwarePage() {
                 </Select>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Proveedor</label>
-                  <Input
-                    value={editForm.proveedor}
-                    onChange={(e) => setEditForm((f) => ({ ...f, proveedor: e.target.value }))}
-                    className="h-9 text-sm"
-                    placeholder="Texto"
-                  />
+                <div className={cn('space-y-2', editItem && 'cursor-not-allowed')} title={editItem ? 'No se puede cambiar el proveedor al editar' : undefined}>
+                  <label className="text-sm font-medium text-foreground">
+                    Proveedor
+                    {editItem && <span className="ml-1.5 text-xs text-muted-foreground font-normal">(solo lectura)</span>}
+                  </label>
+                  {editItem ? (
+                    <Input
+                      value={editForm.proveedor}
+                      readOnly
+                      disabled
+                      className="h-9 text-sm bg-muted cursor-not-allowed"
+                      title="No se puede cambiar el proveedor al editar"
+                    />
+                  ) : (
+                    <Select
+                      value={editForm.proveedor || '__none__'}
+                      onValueChange={(v) => setEditForm((f) => ({ ...f, proveedor: v === '__none__' ? '' : v }))}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Seleccionar proveedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Sin proveedor</SelectItem>
+                        {proveedores.map((p) => (
+                          <SelectItem key={p.id} value={p.nombre}>
+                            {p.nombre}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Tipo de licencia</label>
@@ -414,8 +461,8 @@ export default function SoftwarePage() {
                     <SelectContent>
                       <SelectItem value={LICENCIA_NONE}>Sin licencia</SelectItem>
                       {TIPOS_LICENCIA.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

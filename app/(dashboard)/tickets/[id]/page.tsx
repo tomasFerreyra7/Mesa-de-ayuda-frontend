@@ -296,7 +296,7 @@ export default function TicketDetailPage() {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="sm:col-span-2 space-y-2">
-                    <label className="text-sm font-medium text-foreground">Asunto</label>
+                    <label className="text-sm font-medium text-foreground">Asunto <span className="text-destructive">*</span></label>
                     <Input value={editAsunto} onChange={(e) => setEditAsunto(e.target.value)} className="h-9 text-sm" />
                   </div>
                   <div className="sm:col-span-2 space-y-2">
@@ -304,7 +304,7 @@ export default function TicketDetailPage() {
                     <Textarea value={editDescripcion} onChange={(e) => setEditDescripcion(e.target.value)} rows={4} className="text-sm min-h-[100px]" />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Prioridad</label>
+                    <label className="text-sm font-medium text-foreground">Prioridad <span className="text-destructive">*</span></label>
                     <Select value={editPrioridad} onValueChange={setEditPrioridad}>
                       <SelectTrigger className="h-9 text-sm">
                         <SelectValue />
