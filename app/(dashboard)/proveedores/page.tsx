@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, Phone, Mail, Building2, Pencil } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Building2, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { proveedoresApi } from '@/lib/api';
 import type { Proveedor } from '@/lib/api';
@@ -24,6 +24,7 @@ export default function ProveedoresPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [editItem, setEditItem] = useState<Proveedor | null>(null);
+  const [creatingProveedor, setCreatingProveedor] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editForm, setEditForm] = useState({ nombre: '', cuit: '', telefono: '', email: '', contacto: '' });
 
@@ -49,8 +50,15 @@ export default function ProveedoresPage() {
       .catch(() => setProveedores(MOCK_PROVEEDORES));
   };
 
+  const openNew = () => {
+    setCreatingProveedor(true);
+    setEditItem(null);
+    setEditForm({ nombre: '', cuit: '', telefono: '', email: '', contacto: '' });
+  };
+
   const openEdit = (p: Proveedor) => {
     setEditItem(p);
+    setCreatingProveedor(false);
     setEditForm({
       nombre: p.nombre,
       cuit: p.cuit ?? '',
@@ -61,23 +69,51 @@ export default function ProveedoresPage() {
   };
 
   const handleSaveProveedor = async () => {
-    if (!editItem) return;
+    if (!editForm.nombre.trim()) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
     setSaving(true);
     try {
-      await proveedoresApi.update(editItem.id, {
-        nombre: editForm.nombre,
-        cuit: editForm.cuit || undefined,
-        telefono: editForm.telefono || undefined,
-        email: editForm.email || undefined,
-        contacto: editForm.contacto || undefined,
-      });
-      toast.success('Proveedor actualizado');
+      if (editItem) {
+        await proveedoresApi.update(editItem.id, {
+          nombre: editForm.nombre.trim(),
+          cuit: editForm.cuit.trim() || undefined,
+          telefono: editForm.telefono.trim() || undefined,
+          email: editForm.email.trim() || undefined,
+          contacto: editForm.contacto.trim() || undefined,
+        });
+        toast.success('Proveedor actualizado');
+      } else {
+        await proveedoresApi.create({
+          nombre: editForm.nombre.trim(),
+          cuit: editForm.cuit.trim() || undefined,
+          telefono: editForm.telefono.trim() || undefined,
+          email: editForm.email.trim() || undefined,
+          contacto: editForm.contacto.trim() || undefined,
+        });
+        toast.success('Proveedor creado');
+      }
       setEditItem(null);
+      setCreatingProveedor(false);
       load();
-    } catch {
-      toast.error('Error al guardar');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(typeof msg === 'string' ? msg : 'Error al guardar');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteProveedor = async (p: Proveedor) => {
+    if (!window.confirm(`¿Eliminar el proveedor "${p.nombre}"?`)) return;
+    try {
+      await proveedoresApi.delete(p.id);
+      toast.success('Proveedor eliminado');
+      load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(typeof msg === 'string' ? msg : 'Error al eliminar');
     }
   };
 
@@ -90,12 +126,14 @@ export default function ProveedoresPage() {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar proveedores…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
         </div>
-        <div className="ml-auto">
-          <Button size="sm">
-            <Plus className="w-4 h-4" />
-            Nuevo Proveedor
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="ml-auto">
+            <Button size="sm" onClick={openNew}>
+              <Plus className="w-4 h-4" />
+              Nuevo Proveedor
+            </Button>
+          </div>
+        )}
       </motion.div>
 
       {loading ? (
@@ -118,24 +156,42 @@ export default function ProveedoresPage() {
               className="bg-card border border-border rounded-xl p-5 hover:shadow-md transition-shadow group relative"
             >
               {canEdit && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    openEdit(p);
-                  }}
-                >
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-                </Button>
+                <div className="absolute top-3 right-3 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openEdit(p);
+                    }}
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDeleteProveedor(p);
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
               )}
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
                   <Building2 className="w-4 h-4 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0 pr-8">
-                  <p className="text-sm font-semibold text-foreground truncate">{p.nombre}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-foreground truncate">{p.nombre}</p>
+                    {!p.activo && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">Inactivo</span>
+                    )}
+                  </div>
                   {p.cuit && <p className="text-xs text-muted-foreground">CUIT: {p.cuit}</p>}
                 </div>
               </div>
@@ -173,32 +229,68 @@ export default function ProveedoresPage() {
         </div>
       )}
 
-      <Dialog open={!!editItem} onOpenChange={(open) => !open && setEditItem(null)}>
+      <Dialog
+        open={!!editItem || creatingProveedor}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditItem(null);
+            setCreatingProveedor(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg p-0">
           <div className="px-6 py-5 border-b border-border">
-            <h3 className="text-base font-semibold text-foreground">Editar proveedor</h3>
+            <h3 className="text-base font-semibold text-foreground">{creatingProveedor ? 'Nuevo proveedor' : 'Editar proveedor'}</h3>
           </div>
-          {editItem && (
+          {(editItem || creatingProveedor) && (
             <div className="px-6 py-5 space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nombre</label>
-                <Input value={editForm.nombre} onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))} className="h-9 text-sm" />
+                <label className="text-sm font-medium text-foreground">Nombre *</label>
+                <Input
+                  value={editForm.nombre}
+                  onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))}
+                  className="h-9 text-sm"
+                  maxLength={150}
+                  placeholder="Máx. 150 caracteres"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">CUIT</label>
-                <Input value={editForm.cuit} onChange={(e) => setEditForm((f) => ({ ...f, cuit: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  value={editForm.cuit}
+                  onChange={(e) => setEditForm((f) => ({ ...f, cuit: e.target.value }))}
+                  className="h-9 text-sm"
+                  maxLength={20}
+                  placeholder="Máx. 20 caracteres"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Teléfono</label>
-                <Input value={editForm.telefono} onChange={(e) => setEditForm((f) => ({ ...f, telefono: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  value={editForm.telefono}
+                  onChange={(e) => setEditForm((f) => ({ ...f, telefono: e.target.value }))}
+                  className="h-9 text-sm"
+                  maxLength={50}
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Email</label>
-                <Input type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  className="h-9 text-sm"
+                  maxLength={254}
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Contacto</label>
-                <Input value={editForm.contacto} onChange={(e) => setEditForm((f) => ({ ...f, contacto: e.target.value }))} className="h-9 text-sm" />
+                <Input
+                  value={editForm.contacto}
+                  onChange={(e) => setEditForm((f) => ({ ...f, contacto: e.target.value }))}
+                  className="h-9 text-sm"
+                  maxLength={150}
+                />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <DialogClose asChild>
@@ -207,7 +299,7 @@ export default function ProveedoresPage() {
                   </Button>
                 </DialogClose>
                 <Button size="sm" loading={saving} onClick={handleSaveProveedor}>
-                  Guardar
+                  {creatingProveedor ? 'Crear' : 'Guardar'}
                 </Button>
               </div>
             </div>

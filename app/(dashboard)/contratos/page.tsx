@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Search, RefreshCw, Pencil } from 'lucide-react';
+import { Plus, Search, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
 import { contratosApi, proveedoresApi } from '@/lib/api';
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatDate, formatMoney, cn } from '@/lib/utils';
+import { formatDate, formatMoney, truncate, cn } from '@/lib/utils';
 import { differenceInDays, parseISO } from 'date-fns';
 import { useAuthStore } from '@/store/auth.store';
 import { toast } from 'sonner';
@@ -27,6 +27,18 @@ const estadoContratoStyle: Record<string, string> = {
   Rescindido: 'bg-secondary text-muted-foreground border-border',
   'En Renovacion': 'bg-info-light text-info border-info/20',
 };
+
+const ESTADOS_CONTRATO = ['Vigente', 'Por Vencer', 'Vencido', 'Rescindido', 'En Renovacion'] as const;
+
+const TIPOS_CONTRATO = ['Mantenimiento HW', 'Soporte SW', 'Conectividad', 'Seguridad IT', 'Consultoria', 'Otro'] as const;
+
+const MONEDAS = [
+  { value: 'ARS', label: 'ARS — Peso argentino' },
+  { value: 'USD', label: 'USD — Dólar estadounidense' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'UYU', label: 'UYU — Peso uruguayo' },
+  { value: 'BRL', label: 'BRL — Real brasileño' },
+] as const;
 
 const columns: ColumnDef<Contrato>[] = [
   {
@@ -91,6 +103,20 @@ const columns: ColumnDef<Contrato>[] = [
       </span>
     ),
   },
+  {
+    accessorKey: 'observaciones',
+    header: 'Observaciones',
+    size: 160,
+    cell: ({ row }) => {
+      const obs = (row.original as { observaciones?: string }).observaciones?.trim();
+      if (!obs) return <span className="text-xs text-muted-foreground">—</span>;
+      return (
+        <span className="text-xs text-muted-foreground block max-w-[160px] truncate" title={obs}>
+          {truncate(obs, 45)}
+        </span>
+      );
+    },
+  },
 ];
 
 export default function ContratosPage() {
@@ -113,10 +139,11 @@ export default function ContratosPage() {
   const [editForm, setEditForm] = useState({
     nro_contrato: '',
     proveedor_id: '',
-    tipo: '',
+    tipo: 'Mantenimiento HW',
     descripcion: '',
     fecha_inicio: '',
     fecha_venc: '',
+    estado: 'Vigente',
     monto: '',
     moneda: 'ARS',
     observaciones: '',
@@ -170,10 +197,11 @@ export default function ContratosPage() {
     setEditForm({
       nro_contrato: c.nro_contrato ?? c.nroContrato ?? '',
       proveedor_id: c.proveedor?.id != null ? String(c.proveedor.id) : '',
-      tipo: c.tipo,
+      tipo: c.tipo ?? '',
       descripcion: c.descripcion ?? '',
-      fecha_inicio: c.fecha_inicio ?? '',
+      fecha_inicio: c.fecha_inicio ?? (c as { fechaInicio?: string }).fechaInicio ?? '',
       fecha_venc: c.fecha_venc ?? c.fechaVenc ?? '',
+      estado: c.estado ?? 'Vigente',
       monto: c.monto != null ? String(c.monto) : '',
       moneda: c.moneda ?? 'ARS',
       observaciones: (c as { observaciones?: string }).observaciones ?? '',
@@ -196,7 +224,7 @@ export default function ContratosPage() {
           fecha_inicio: editForm.fecha_inicio,
           fecha_venc: editForm.fecha_venc,
           monto: editForm.monto ? Number(editForm.monto) : undefined,
-          moneda: editForm.moneda || undefined,
+          moneda: editForm.moneda || 'ARS',
           observaciones: editForm.observaciones?.trim() || undefined,
         });
         toast.success('Contrato creado');
@@ -209,18 +237,15 @@ export default function ContratosPage() {
       }
       return;
     }
-    if (!editItem?.proveedor?.id) return;
+    if (!editItem) return;
     setSaving(true);
     try {
+      // PATCH: solo campos editables (no nro_contrato, proveedor_id, tipo, fecha_inicio, moneda)
       await contratosApi.update(editItem.id, {
-        nro_contrato: editForm.nro_contrato,
-        proveedor_id: editItem.proveedor.id,
-        tipo: editForm.tipo,
-        descripcion: editForm.descripcion || undefined,
-        fecha_inicio: editForm.fecha_inicio,
-        fecha_venc: editForm.fecha_venc,
+        descripcion: editForm.descripcion?.trim() || undefined,
+        fecha_venc: editForm.fecha_venc || undefined,
+        estado: editForm.estado || undefined,
         monto: editForm.monto ? Number(editForm.monto) : undefined,
-        moneda: editForm.moneda,
         observaciones: editForm.observaciones?.trim() || undefined,
       });
       toast.success('Contrato actualizado');
@@ -233,6 +258,19 @@ export default function ContratosPage() {
     }
   };
 
+  const handleDeleteContrato = async (c: Contrato) => {
+    const nro = c.nro_contrato ?? c.nroContrato ?? c.id;
+    if (!window.confirm(`¿Eliminar el contrato ${nro}?`)) return;
+    try {
+      await contratosApi.delete(c.id);
+      toast.success('Contrato eliminado');
+      load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(typeof msg === 'string' ? msg : 'Error al eliminar');
+    }
+  };
+
   const columnsWithEdit: ColumnDef<Contrato>[] = [
     ...columns,
     ...(canEdit
@@ -240,19 +278,32 @@ export default function ContratosPage() {
           {
             id: 'acciones',
             header: '',
-            size: 60,
+            size: 100,
             cell: ({ row }: { row: { original: Contrato } }) => (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openEdit(row.original);
-                }}
-              >
-                <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit(row.original);
+                  }}
+                >
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteContrato(row.original);
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             ),
           } as ColumnDef<Contrato>,
         ]
@@ -285,10 +336,11 @@ export default function ContratosPage() {
               setEditForm({
                 nro_contrato: '',
                 proveedor_id: '',
-                tipo: '',
+                tipo: 'Mantenimiento HW',
                 descripcion: '',
                 fecha_inicio: '',
                 fecha_venc: '',
+                estado: 'Vigente',
                 monto: '',
                 moneda: 'ARS',
                 observaciones: '',
@@ -354,12 +406,18 @@ export default function ContratosPage() {
                 <label className="text-sm font-medium text-foreground">
                   Tipo <span className="text-destructive">*</span>
                 </label>
-                <Input
-                  value={editForm.tipo}
-                  onChange={(e) => setEditForm((f) => ({ ...f, tipo: e.target.value }))}
-                  className="h-9 text-sm"
-                  placeholder="Ej. Mantenimiento HW"
-                />
+                <Select value={editForm.tipo || TIPOS_CONTRATO[0]} onValueChange={(v) => setEditForm((f) => ({ ...f, tipo: v }))}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIPOS_CONTRATO.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Descripción</label>
@@ -394,26 +452,48 @@ export default function ContratosPage() {
                   />
                 </div>
               </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Estado</label>
+                <Select value={editForm.estado} onValueChange={(v) => setEditForm((f) => ({ ...f, estado: v }))}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Estado del contrato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ESTADOS_CONTRATO.map((e) => (
+                      <SelectItem key={e} value={e}>
+                        {e}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Monto</label>
                   <Input
                     type="number"
                     min={0}
+                    step="0.01"
                     value={editForm.monto}
                     onChange={(e) => setEditForm((f) => ({ ...f, monto: e.target.value }))}
                     className="h-9 text-sm"
-                    placeholder="Número"
+                    placeholder="Ej. 150000"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Moneda</label>
-                  <Input
-                    value={editForm.moneda}
-                    onChange={(e) => setEditForm((f) => ({ ...f, moneda: e.target.value }))}
-                    className="h-9 text-sm"
-                    placeholder="ARS"
-                  />
+                  <Select value={editForm.moneda} onValueChange={(v) => setEditForm((f) => ({ ...f, moneda: v }))}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Seleccionar moneda" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONEDAS.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-2">

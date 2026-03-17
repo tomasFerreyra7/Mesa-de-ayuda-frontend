@@ -34,68 +34,48 @@ Abrir http://localhost:3000
 
 ## Ejecutar con Docker (frontend + backend juntos)
 
-Este frontend está preparado para levantarse en **Docker** junto con el backend usando `docker-compose`, de forma portable para cualquier entorno.
+Cualquier persona que clone el repo puede levantar todo con Docker si tiene el archivo `.env` del backend (se comparte por privado, no está en el repo).
 
-### 1. Estructura de carpetas esperada
+### Requisitos
 
-Suponiendo un monorepo similar a:
+- **Docker** y **Docker Compose** instalados.
+- Archivo **`.env`** en la raíz de este proyecto (`sistemapj`), con las variables del backend (base de datos, JWT, CORS, etc.). Quien mantenga el repo te lo pasa por privado; no está en Git por seguridad.
 
-```text
-repo-root/
-├── backend/
-│   └── sistemap-backend/      # código + Dockerfile del backend
-└── fronend/
-    └── sistemapj/             # este frontend (Next.js) + docker-compose.yml
-```
+### Pasos para quien clone el repo
 
-Si tu estructura es distinta, solo ajustá las rutas de `build:` y `env_file:` en el `docker-compose.yml`.
+1. **Clonar el repositorio** (solo el frontend, o el monorepo si aplica).
 
-### 2. Variables de entorno del frontend
+2. **Entrar a la carpeta del frontend** (donde está este README y el `docker-compose.yml`):
 
-En `.env.local` (o vía `docker-compose`), la API del backend debe apuntar al **servicio** `backend` dentro de la red de Docker:
+   ```bash
+   cd sistemapj
+   ```
 
-```env
-NEXT_PUBLIC_API_URL=http://backend:8081/v1
-```
+3. **Crear el archivo `.env`** en esa misma carpeta con el contenido que te hayan pasado por privado. Debe tener al menos: `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`, `NODE_ENV`, `CORS_ORIGINS` (incluyendo `http://localhost:3000`).
 
-### 3. `docker-compose.yml` (desde la carpeta del frontend)
+4. **Estructura para construir el backend:** el `docker-compose` construye el backend desde la ruta `../../backend/sistemap-backend` (relativa a esta carpeta). Es decir, la estructura esperada es:
 
-En la raíz de este proyecto (`fronend/sistemapj`) se usa un `docker-compose.yml` similar a:
+   ```text
+   Curso de verano/   (o tu carpeta raíz)
+   ├── backend/
+   │   └── sistemap-backend/   ← Dockerfile + código del backend
+   └── fronend/
+       └── sistemapj/         ← este repo + .env + docker-compose.yml
+   ```
 
-```yaml
-services:
-  backend:
-    build: ../../backend/sistemap-backend # ruta relativa al backend
-    container_name: sistemapj-backend
-    ports:
-      - '8081:8081'
-    env_file:
-      - ../../backend/sistemap-backend/.env
+   Si el backend está en otra ruta, editá en `docker-compose.yml` la línea `context: ../../backend/sistemap-backend` y poné la ruta correcta.
 
-  frontend:
-    build: . # este directorio (frontend)
-    container_name: sistemapj-frontend
-    depends_on:
-      - backend
-    environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8081/v1
-    ports:
-      - '3000:3000'
-```
+5. **Levantar todo con un solo comando:**
 
-Si tu backend está en otra carpeta, solo cambiá `../../backend/sistemap-backend` y la ruta del `.env` por la ruta relativa correcta.
+   ```bash
+   npm run up
+   ```
 
-### 4. Levantar todo con un solo comando
+   (o `docker-compose up --build`). Se construyen backend y frontend y se inician ambos.
 
-Desde la carpeta del frontend (`fronend/sistemapj`):
-
-```bash
-docker-compose build
-docker-compose up
-```
-
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8081 (la API se consume desde el front con `http://backend:8080/v1` dentro de Docker)
+6. **Abrir en el navegador:**
+   - **Frontend:** http://localhost:3000
+   - **Backend (API):** http://localhost:8080/v1
 
 ---
 
