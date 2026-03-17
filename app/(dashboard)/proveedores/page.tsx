@@ -245,7 +245,7 @@ export default function ProveedoresPage() {
           {(editItem || creatingProveedor) && (
             <div className="px-6 py-5 space-y-5">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nombre *</label>
+                <label className="text-sm font-medium text-foreground">Nombre <span className="text-destructive">*</span></label>
                 <Input
                   value={editForm.nombre}
                   onChange={(e) => setEditForm((f) => ({ ...f, nombre: e.target.value }))}

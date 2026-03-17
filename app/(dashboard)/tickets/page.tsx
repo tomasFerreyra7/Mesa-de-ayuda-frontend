@@ -101,7 +101,7 @@ export default function TicketsPage() {
   const [loading, setLoading] = useState(true);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [filters, setFilters] = useState<TicketFilters>({ page: 1, per_page: 20 });
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
 
   const isTecnico = user?.rol && ROLES_TECNICOS.includes(user.rol);
   const canCreateTicket = user?.rol && ROLES_CAN_CREATE_TICKET.includes(user.rol);
@@ -117,8 +117,8 @@ export default function TicketsPage() {
         setTickets(data);
         setMeta(res.data.meta);
       } catch {
-        setTickets(MOCK_TICKETS);
-        setMeta({ total: MOCK_TICKETS.length, page: 1, per_page: 20, pages: 1 });
+        setTickets([]);
+        setMeta(undefined);
       } finally {
         setLoading(false);
       }
@@ -130,10 +130,13 @@ export default function TicketsPage() {
     load(filters);
   }, [filters, load]);
 
-  const handleSearch = (q: string) => {
-    setSearch(q);
-    setFilters((prev) => ({ ...prev, q: q || undefined, page: 1 }));
-  };
+  // Debounce del buscador para reducir la cantidad de requests
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setFilters((prev) => ({ ...prev, q: searchInput || undefined, page: 1 }));
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [searchInput]);
 
   return (
     <div className="space-y-4">
@@ -141,7 +144,7 @@ export default function TicketsPage() {
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Buscar tickets…" value={search} onChange={(e) => handleSearch(e.target.value)} className="pl-8 h-8 text-xs" />
+          <Input placeholder="Buscar tickets…" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} className="pl-8 h-8 text-xs" />
         </div>
 
         <Select value={filters.estado ?? ALL_FILTER} onValueChange={(v) => setFilters((p) => ({ ...p, estado: v === ALL_FILTER ? undefined : v, page: 1 }))}>
@@ -217,86 +220,8 @@ export default function TicketsPage() {
       />
 
       {/* New Ticket Dialog */}
-      {canCreateTicket && <NewTicketDialog open={showNewDialog} onClose={() => setShowNewDialog(false)} onSuccess={() => load(filters)} />}
+      {canCreateTicket && <NewTicketDialog open={showNewDialog} onClose={() => setShowNewDialog(false)} onSuccess={() => load({ ...filters, page: 1 })} />}
     </div>
   );
 }
-
-// Mock data
-const MOCK_TICKETS: Ticket[] = [
-  {
-    id: 1,
-    nroTicket: '#1041',
-    tipo: 'Hardware',
-    asunto: 'PC no enciende en Juzgado Civil 3',
-    estado: 'Abierto',
-    prioridad: 'Alta',
-    creadoPorId: 1,
-    juzgadoId: 1,
-    fechaCreacion: new Date(Date.now() - 3600000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    juzgado: { id: 1, nombre: 'Juzgado Civil 3' },
-  },
-  {
-    id: 2,
-    nroTicket: '#1040',
-    tipo: 'Software',
-    asunto: 'Error en Sistema de Gestión al guardar expediente',
-    estado: 'En Progreso',
-    prioridad: 'Critica',
-    creadoPorId: 2,
-    juzgadoId: 2,
-    fechaCreacion: new Date(Date.now() - 7200000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    juzgado: { id: 2, nombre: 'Cámara Penal' },
-    asignadoA: {
-      id: 3,
-      nombre: 'Lucas Fernández',
-      email: 'l.fernandez@pj.gob.ar',
-      rol: 'tecnico_interno',
-      activo: true,
-      iniciales: 'LF',
-      avatarColor: '#7C3AED',
-    },
-  },
-  {
-    id: 3,
-    nroTicket: '#1039',
-    tipo: 'Red',
-    asunto: 'Sin conexión a internet en Civil 2, Puesto 3',
-    estado: 'Resuelto',
-    prioridad: 'Media',
-    creadoPorId: 1,
-    juzgadoId: 3,
-    fechaCreacion: new Date(Date.now() - 86400000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    juzgado: { id: 3, nombre: 'Juzgado Civil 2' },
-  },
-  {
-    id: 4,
-    nroTicket: '#1038',
-    tipo: 'Hardware',
-    asunto: 'Impresora HP offline Secretaría 1',
-    estado: 'Abierto',
-    prioridad: 'Baja',
-    creadoPorId: 1,
-    juzgadoId: 4,
-    fechaCreacion: new Date(Date.now() - 172800000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    juzgado: { id: 4, nombre: 'Secretaría 1' },
-  },
-  {
-    id: 5,
-    nroTicket: '#1037',
-    tipo: 'Software',
-    asunto: 'Licencia de Office vencida en sala de audiencias',
-    estado: 'Cerrado',
-    prioridad: 'Alta',
-    creadoPorId: 2,
-    juzgadoId: 5,
-    fechaCreacion: new Date(Date.now() - 259200000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    juzgado: { id: 5, nombre: 'Tribunal Oral' },
-  },
-];
 
