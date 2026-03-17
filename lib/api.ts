@@ -383,17 +383,20 @@ export interface CreateContratoDto {
   descripcion?: string;
   fecha_inicio: string;
   fecha_venc: string;
+  estado?: string;
   monto?: number;
   moneda?: string;
   observaciones?: string;
 }
 
+/** DTO alineado con entidad Proveedor (nombre/cuit únicos, longitudes máx). */
 export interface CreateProveedorDto {
   nombre: string;
   cuit?: string;
   telefono?: string;
   email?: string;
   contacto?: string;
+  activo?: boolean;
 }
 
 export interface CreateUsuarioDto {
