@@ -11,7 +11,7 @@ export function SelectTrigger({ className, children, error, ...props }: React.Co
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 text-sm',
+        'flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 text-sm font-sans text-foreground',
         'placeholder:text-muted-foreground',
         'focus:outline-none focus:ring-2 focus:ring-ring',
         'disabled:cursor-not-allowed disabled:opacity-50',
@@ -34,7 +34,7 @@ export function SelectContent({ className, children, ...props }: React.Component
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         className={cn(
-          'relative z-[200] min-w-32 overflow-hidden rounded-xl border border-border bg-card shadow-xl',
+          'relative z-[200] min-w-32 overflow-hidden rounded-xl border border-border bg-card font-sans text-foreground shadow-xl',
           'data-[state=open]:animate-fade-in',
           className,
         )}
@@ -52,7 +52,7 @@ export function SelectItem({ className, children, ...props }: React.ComponentPro
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex cursor-pointer select-none items-center rounded-md pl-2 pr-8 py-2 text-sm outline-none',
+        'relative flex cursor-pointer select-none items-center rounded-md pl-2 pr-8 py-2 text-sm font-sans text-foreground outline-none',
         'focus:bg-secondary focus:text-foreground',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
@@ -64,7 +64,7 @@ export function SelectItem({ className, children, ...props }: React.ComponentPro
           <Check className="w-3.5 h-3.5 text-primary" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText className="truncate">{children}</SelectPrimitive.ItemText>
+      <SelectPrimitive.ItemText className="truncate font-sans">{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   );
 }

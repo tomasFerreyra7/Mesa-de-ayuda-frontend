@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Scale, Loader2 } from 'lucide-react';
-import { authApi, type User } from '@/lib/api';
+import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { normalizeUserFromApi } from '@/lib/normalize-user';
 import { cn } from '@/lib/utils';
 
 const loginSchema = z.object({
@@ -19,10 +20,17 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get('blocked') === '1') {
+      toast.error('No podés acceder al sistema sin iniciar sesión');
+    }
+  }, [searchParams]);
 
   const {
     register,
@@ -42,20 +50,7 @@ export default function LoginPage() {
         toast.error('El backend no devolvió token o usuario. Revisá la consola.');
         return;
       }
-      // Normalizar usuario: backend puede enviar "role", "rol", o texto como "Tecnico Interno"
-      const rawRol = String(rawUser.rol ?? rawUser.role ?? 'tecnico_interno').toLowerCase().replace(/[\s-]+/g, '_');
-      const rolesValidos: User['rol'][] = ['admin', 'operario', 'tecnico_interno', 'tecnico_proveedor'];
-      const rol = rolesValidos.includes(rawRol as User['rol']) ? (rawRol as User['rol']) : 'tecnico_interno';
-
-      const usuario: User = {
-        id: Number(rawUser.id),
-        nombre: String(rawUser.nombre ?? rawUser.name ?? ''),
-        email: String(rawUser.email ?? ''),
-        rol,
-        activo: rawUser.activo !== undefined ? Boolean(rawUser.activo) : true,
-        ...(rawUser.iniciales != null && { iniciales: String(rawUser.iniciales) }),
-        ...(rawUser.avatarColor != null && { avatarColor: String(rawUser.avatarColor) }),
-      };
+      const usuario = normalizeUserFromApi(rawUser);
       setAuth(usuario, token);
       toast.success(`Bienvenido, ${usuario.nombre}`);
       const isTecnico = ['tecnico_interno', 'tecnico_proveedor'].includes(usuario.rol);
@@ -118,7 +113,9 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Email <span className="text-destructive">*</span></label>
+              <label className="text-sm font-medium text-foreground">
+                Email <span className="text-destructive">*</span>
+              </label>
               <input
                 {...register('email')}
                 type="email"
@@ -134,7 +131,9 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Contraseña <span className="text-destructive">*</span></label>
+              <label className="text-sm font-medium text-foreground">
+                Contraseña <span className="text-destructive">*</span>
+              </label>
               <div className="relative">
                 <input
                   {...register('password')}
@@ -183,6 +182,20 @@ export default function LoginPage() {
         <p className="text-center text-xs text-muted-foreground mt-6">Poder Judicial — Sistema Interno</p>
       </motion.div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
 

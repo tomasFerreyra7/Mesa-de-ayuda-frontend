@@ -79,6 +79,18 @@ Cualquier persona que clone el repo puede levantar todo con Docker si tiene el a
 
 ---
 
+## Contrato con el backend (roles y datos)
+
+Pautas alineadas con reglas del API:
+
+| Tema                      | Comportamiento esperado                                                                                                                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Operarios y juzgado**   | Deben tener al menos un juzgado asignado; el **admin** lo gestiona en **Usuarios**.                                                                                                                         |
+| **Tickets tipo Software** | El front envía `juzgado_id` coherente con el modal (admin: selector; operario: juzgado fijo del usuario), junto con `equipo_id` y `software_id` cuando aplica.                                              |
+| **Listado de equipos**    | El backend **no** incluye para operarios equipos **sin puesto** (sin ubicación); el admin ve el parque completo. Mostrar “stock sin ubicar” a operarios requeriría una regla nueva acordada con el backend. |
+
+---
+
 ## Cambiar el tema (IMPORTANTE)
 
 **Todo el sistema de colores está en `src/lib/theme.ts`.**

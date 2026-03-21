@@ -1,5 +1,20 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import type { User } from '@/lib/api';
+
+/** Igual que en login/normalize-user: minúsculas y espacios/guiones → `_` (ej. "Operario" → "operario"). */
+export function normalizeRolString(rol: string | undefined): string {
+  return String(rol ?? '').toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+/** Juzgado asignado al operario (backend puede enviar juzgado_id, juzgado o juzgadoIds). */
+export function getOperarioJuzgadoId(user: User | null | undefined): number | undefined {
+  if (!user || normalizeRolString(user.rol) !== 'operario') return undefined;
+  if (user.juzgado_id != null && !Number.isNaN(Number(user.juzgado_id))) return Number(user.juzgado_id);
+  if (user.juzgado?.id != null) return user.juzgado.id;
+  if (Array.isArray(user.juzgadoIds) && user.juzgadoIds.length > 0) return user.juzgadoIds[0];
+  return undefined;
+}
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

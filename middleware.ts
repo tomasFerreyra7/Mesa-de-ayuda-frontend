@@ -11,9 +11,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // La autenticación real la maneja el cliente con Zustand + localStorage.
-  // Aquí solo redirigimos si no hay cookie de token (opcional, para SSR).
-  // En producción, si usás httpOnly cookies, acá verificarías el token.
+  // Bloqueo temprano para evitar "flash" de dashboard antes de volver a login.
+  const token = request.cookies.get('access_token')?.value;
+  if (!token) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('blocked', '1');
+    return NextResponse.redirect(loginUrl);
+  }
 
   return NextResponse.next();
 }

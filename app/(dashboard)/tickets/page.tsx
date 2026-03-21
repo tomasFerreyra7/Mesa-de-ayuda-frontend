@@ -11,7 +11,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EstadoBadge, PrioridadBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { formatRelative, getSLAStatus } from '@/lib/utils';
+import { formatRelative, getSLAStatus, getOperarioJuzgadoId } from '@/lib/utils';
 import { NewTicketDialog } from '@/components/tickets/new-ticket-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuthStore } from '@/store/auth.store';
@@ -111,6 +111,8 @@ export default function TicketsPage() {
       setLoading(true);
       const params: TicketFilters = { ...f };
       if (isTecnico && user?.id) params.asignado_a_id = user.id;
+      const jid = getOperarioJuzgadoId(user ?? undefined);
+      if (jid != null) params.juzgado_id = jid;
       try {
         const res = await ticketsApi.list(params);
         const data = res.data.data ?? [];
@@ -123,7 +125,7 @@ export default function TicketsPage() {
         setLoading(false);
       }
     },
-    [isTecnico, user?.id],
+    [isTecnico, user],
   );
 
   useEffect(() => {

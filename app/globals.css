@@ -72,6 +72,14 @@
       'rlig' 1,
       'calt' 1;
   }
+
+  /* Misma tipografía sans en controles (Radix Select/Dialog en portal; evita fallback serif en algunos navegadores) */
+  button,
+  input,
+  textarea,
+  select {
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
   ::-webkit-scrollbar {
     width: 5px;
     height: 5px;
