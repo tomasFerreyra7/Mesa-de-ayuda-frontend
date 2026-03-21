@@ -4,13 +4,35 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ticketsApi, ubicacionesApi, usuariosApi, equiposApi } from '@/lib/api';
-import type { User, Equipo } from '@/lib/api';
+import { ticketsApi, ubicacionesApi, usuariosApi, equiposApi, softwareApi } from '@/lib/api';
+import type { User, Equipo, Software } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
+import { getOperarioJuzgadoId } from '@/lib/utils';
+
+/** Soporta { data: Software[] }, { data: { data: [] } }, array plano, items, software. */
+function parseSoftwareListFromResponse(body: unknown): Software[] {
+  if (Array.isArray(body)) return body as Software[];
+  if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    const d = o.data;
+    if (Array.isArray(d)) return d as Software[];
+    if (d && typeof d === 'object') {
+      const inner = d as Record<string, unknown>;
+      if (Array.isArray(inner.data)) return inner.data as Software[];
+      if (Array.isArray(inner.items)) return inner.items as Software[];
+    }
+    for (const key of ['items', 'software', 'results'] as const) {
+      const val = o[key];
+      if (Array.isArray(val)) return val as Software[];
+    }
+  }
+  return [];
+}
 
 function parseTecnicosFromResponse(body: unknown): User[] {
   if (Array.isArray(body)) return body as User[];
@@ -31,15 +53,22 @@ function parseTecnicosFromResponse(body: unknown): User[] {
   return [];
 }
 
-const schema = z.object({
-  tipo: z.enum(['Hardware', 'Software', 'Red', 'Otro']),
-  asunto: z.string().min(5, 'Mínimo 5 caracteres').max(255),
-  descripcion: z.string().optional(),
-  prioridad: z.enum(['Critica', 'Alta', 'Media', 'Baja']),
-  juzgado_id: z.string().min(1, 'Seleccioná un juzgado'),
-  equipo_id: z.string().refine((v) => v && v !== '__none__' && !Number.isNaN(parseInt(v, 10)), 'Seleccioná un equipo'),
-  asignado_a_id: z.string().optional(),
-});
+const schema = z
+  .object({
+    tipo: z.enum(['Hardware', 'Software', 'Red', 'Otro']),
+    asunto: z.string().min(5, 'Mínimo 5 caracteres').max(255),
+    descripcion: z.string().optional(),
+    prioridad: z.enum(['Critica', 'Alta', 'Media', 'Baja']),
+    juzgado_id: z.string().min(1, 'Seleccioná un juzgado'),
+    equipo_id: z.string().refine((v) => v && v !== '__none__' && !Number.isNaN(parseInt(v, 10)), 'Seleccioná un equipo'),
+    software_id: z.string().optional(),
+    asignado_a_id: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.tipo === 'Software' && (!data.software_id || data.software_id === '__none__')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Seleccioná un software', path: ['software_id'] });
+    }
+  });
 
 type FormData = z.infer<typeof schema>;
 
@@ -50,8 +79,15 @@ interface Props {
 }
 
 export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
+  const authUser = useAuthStore((s) => s.user);
+  const isAdmin = authUser?.rol === 'admin';
+  const operarioJuzgadoId = useMemo(() => getOperarioJuzgadoId(authUser), [authUser]);
+
   const [juzgados, setJuzgados] = useState<{ id: number; nombre: string }[]>([]);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
+  const [softwareList, setSoftwareList] = useState<Software[]>([]);
+  const [loadingSoftware, setLoadingSoftware] = useState(false);
+  const [loadingEquipos, setLoadingEquipos] = useState(false);
   const [tecnicos, setTecnicos] = useState<User[]>([]);
   const [tecnicosLoading, setTecnicosLoading] = useState(false);
 
@@ -64,42 +100,108 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { tipo: 'Hardware', prioridad: 'Media', equipo_id: '__none__' },
+    defaultValues: { tipo: 'Hardware', prioridad: 'Media', equipo_id: '__none__', software_id: '__none__', juzgado_id: '' },
   });
 
   const tipo = watch('tipo');
   const juzgadoId = watch('juzgado_id');
 
+  // Lista de juzgados solo para admin
   useEffect(() => {
-    if (open) {
-      ubicacionesApi
-        .juzgados()
-        .then((res) => {
-          setJuzgados(res.data.data ?? []);
-        })
-        .catch(() => {
-          setJuzgados([
-            { id: 1, nombre: 'Juzgado Civil 1' },
-            { id: 2, nombre: 'Juzgado Civil 2' },
-            { id: 3, nombre: 'Cámara Penal' },
-            { id: 4, nombre: 'Tribunal Oral' },
-            { id: 5, nombre: 'Secretaría General' },
-          ]);
-        });
-      // Backend puede rechazar per_page alto (400); usar 50 y, si falla, intentar sin params
-      equiposApi
-        .list({ per_page: 50, page: 1 })
-        .then((res) => setEquipos(res.data.data ?? []))
-        .catch(() => {
-          equiposApi
-            .list()
-            .then((res2) => setEquipos(res2.data.data ?? []))
-            .catch(() => setEquipos([]));
-        });
+    if (!open || !isAdmin) return;
+    ubicacionesApi
+      .juzgados()
+      .then((res) => {
+        setJuzgados(res.data.data ?? []);
+      })
+      .catch(() => setJuzgados([]));
+  }, [open, isAdmin]);
+
+  // Al abrir: resetear formulario; operario: juzgado fijo
+  useEffect(() => {
+    if (!open) return;
+    reset({
+      tipo: 'Hardware',
+      prioridad: 'Media',
+      equipo_id: '__none__',
+      software_id: '__none__',
+      asunto: '',
+      descripcion: '',
+      asignado_a_id: undefined,
+      juzgado_id: isAdmin ? '' : operarioJuzgadoId != null ? String(operarioJuzgadoId) : '',
+    });
+  }, [open, isAdmin, operarioJuzgadoId, reset]);
+
+  // Catálogo de software al abrir el modal (listo cuando el usuario elige tipo Software)
+  useEffect(() => {
+    if (!open) {
+      setSoftwareList([]);
+      return;
     }
+    let cancelled = false;
+    setLoadingSoftware(true);
+    const loadPages = async () => {
+      const perPage = 100;
+      const merged: Software[] = [];
+      try {
+        let page = 1;
+        let totalPages = 1;
+        do {
+          const res = await softwareApi.list({ page, per_page: perPage });
+          if (cancelled) return;
+          const chunk = parseSoftwareListFromResponse(res.data);
+          merged.push(...chunk);
+          const meta = (res.data as { meta?: { pages?: number } })?.meta;
+          totalPages = meta?.pages ?? 1;
+          if (chunk.length === 0) break;
+          page += 1;
+        } while (page <= totalPages && page <= 50);
+        if (!cancelled) setSoftwareList(merged);
+      } catch {
+        if (!cancelled) setSoftwareList([]);
+      } finally {
+        if (!cancelled) setLoadingSoftware(false);
+      }
+    };
+    void loadPages();
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
-  // Cargar técnicos al abrir el modal (y al cambiar juzgado) para que el GET se dispare y el dropdown tenga opciones
+  // Equipos filtrados por juzgado seleccionado (admin) o del operario
+  useEffect(() => {
+    if (!open) return;
+    let jid: number | undefined;
+    if (isAdmin) {
+      const v = juzgadoId;
+      jid = v ? parseInt(v, 10) : undefined;
+    } else {
+      jid = operarioJuzgadoId;
+    }
+    if (jid == null || Number.isNaN(jid)) {
+      setEquipos([]);
+      setValue('equipo_id', '__none__');
+      return;
+    }
+    setLoadingEquipos(true);
+    equiposApi
+      .list({ juzgado_id: jid, per_page: 100, page: 1 })
+      .then((res) => {
+        setEquipos(res.data.data ?? []);
+        setValue('equipo_id', '__none__');
+      })
+      .catch(() => {
+        setEquipos([]);
+        setValue('equipo_id', '__none__');
+      })
+      .finally(() => setLoadingEquipos(false));
+  }, [open, isAdmin, juzgadoId, operarioJuzgadoId, setValue]);
+
+  useEffect(() => {
+    if (tipo !== 'Software') setValue('software_id', '__none__');
+  }, [tipo, setValue]);
+
   useEffect(() => {
     if (!open) {
       setTecnicos([]);
@@ -151,13 +253,19 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
       toast.error('Seleccioná un equipo');
       return;
     }
+    if (data.tipo === 'Software' && (!data.software_id || data.software_id === '__none__')) {
+      toast.error('Seleccioná un software');
+      return;
+    }
     try {
+      // Backend: juzgado_id debe ser el del modal (admin: select; operario: juzgado fijo), también para tickets tipo Software.
       const payload = {
         tipo: data.tipo,
         asunto: data.asunto.trim(),
         prioridad: data.prioridad,
         juzgado_id: juzgadoIdNum,
         equipo_id: equipoIdNum,
+        ...(data.tipo === 'Software' && data.software_id && data.software_id !== '__none__' ? { software_id: parseInt(data.software_id, 10) } : {}),
         ...(data.descripcion?.trim() && { descripcion: data.descripcion.trim() }),
       };
       const res = await ticketsApi.create(payload);
@@ -196,11 +304,17 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
 
   const ph = placeholdersByTipo[tipo] ?? placeholdersByTipo.Hardware;
 
+  const operarioSinJuzgado = !isAdmin && operarioJuzgadoId == null;
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent title="Nuevo Ticket" description="Completá los datos del incidente o solicitud" size="md">
+        {operarioSinJuzgado && (
+          <div className="mx-6 mt-2 rounded-md border border-warning/40 bg-warning-light px-3 py-2 text-xs text-foreground">
+            Tu usuario operario no tiene juzgado asignado. Pedile a un administrador que te asocie a un juzgado para poder crear tickets.
+          </div>
+        )}
         <form onSubmit={handleSubmit(onSubmit)} className="px-6 py-4 space-y-4">
-          {/* Tipo + Prioridad */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">
@@ -244,7 +358,6 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
             </div>
           </div>
 
-          {/* Asunto */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">
               Asunto <span className="text-destructive">*</span>
@@ -253,47 +366,77 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
             {errors.asunto && <p className="text-xs text-danger">{errors.asunto.message}</p>}
           </div>
 
-          {/* Descripción */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">Descripción</label>
             <Textarea {...register('descripcion')} placeholder={ph.desc} rows={3} />
           </div>
 
-          {/* Juzgado */}
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">
-              Juzgado <span className="text-destructive">*</span>
-            </label>
-            <Select value={watch('juzgado_id') ?? ''} onValueChange={(v) => setValue('juzgado_id', v)}>
-              <SelectTrigger error={!!errors.juzgado_id}>
-                <SelectValue placeholder="Seleccioná el juzgado…" />
-              </SelectTrigger>
-              <SelectContent>
-                {juzgados.map((j) => (
-                  <SelectItem key={j.id} value={String(j.id)}>
-                    {j.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.juzgado_id && <p className="text-xs text-danger">{errors.juzgado_id.message}</p>}
-          </div>
+          {/* Juzgado: solo admin elige; operario usa el asignado */}
+          {isAdmin ? (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Juzgado <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={watch('juzgado_id') ?? ''}
+                onValueChange={(v) => {
+                  setValue('juzgado_id', v);
+                  setValue('equipo_id', '__none__');
+                }}
+              >
+                <SelectTrigger error={!!errors.juzgado_id}>
+                  <SelectValue placeholder="Seleccioná el juzgado…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {juzgados.map((j) => (
+                    <SelectItem key={j.id} value={String(j.id)}>
+                      {j.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.juzgado_id && <p className="text-xs text-danger">{errors.juzgado_id.message}</p>}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Juzgado</label>
+              <Input
+                readOnly
+                disabled
+                className="bg-muted cursor-not-allowed"
+                value={authUser?.juzgado?.nombre ?? (operarioJuzgadoId != null ? `Juzgado #${operarioJuzgadoId}` : '—')}
+              />
+              <input type="hidden" {...register('juzgado_id')} />
+            </div>
+          )}
 
-          {/* Equipo (requerido por el backend) */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">
               Equipo <span className="text-destructive">*</span>
             </label>
-            <Select value={watch('equipo_id') ?? '__none__'} onValueChange={(v) => setValue('equipo_id', v)}>
+            <Select
+              value={watch('equipo_id') ?? '__none__'}
+              onValueChange={(v) => setValue('equipo_id', v)}
+              disabled={loadingEquipos || operarioSinJuzgado || (isAdmin && !juzgadoId)}
+            >
               <SelectTrigger error={!!errors.equipo_id}>
-                <SelectValue placeholder={equipos.length === 0 ? 'Cargando equipos…' : 'Seleccioná el equipo…'} />
+                <SelectValue
+                  placeholder={
+                    loadingEquipos
+                      ? 'Cargando equipos…'
+                      : isAdmin && !juzgadoId
+                        ? 'Primero elegí un juzgado'
+                        : operarioSinJuzgado
+                          ? 'Sin juzgado asignado'
+                          : 'Seleccioná el equipo…'
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">Seleccioná el equipo…</SelectItem>
                 {equipos.map((e) => (
                   <SelectItem key={e.id} value={String(e.id)}>
-                    {e.nro_inventario} — {e.clase}
-                    {e.puesto?.juzgado?.nombre ? ` (${e.puesto.juzgado.nombre})` : ''}
+                    {e.nro_inventario ?? e.nroInventario} — {e.clase}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -301,7 +444,33 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
             {errors.equipo_id && <p className="text-xs text-danger">{errors.equipo_id.message}</p>}
           </div>
 
-          {/* Asignar a (opcional) */}
+          {tipo === 'Software' && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Software <span className="text-destructive">*</span>
+              </label>
+              <Select value={watch('software_id') ?? '__none__'} onValueChange={(v) => setValue('software_id', v)}>
+                <SelectTrigger error={!!errors.software_id}>
+                  <SelectValue
+                    placeholder={
+                      loadingSoftware ? 'Cargando software…' : softwareList.length === 0 ? 'No hay software en el catálogo' : 'Seleccioná el software…'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Seleccioná el software…</SelectItem>
+                  {softwareList.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.nombre}
+                      {s.version ? ` (${s.version})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.software_id && <p className="text-xs text-danger">{errors.software_id.message}</p>}
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">Asignar a</label>
             <Select
@@ -327,14 +496,13 @@ export function NewTicketDialog({ open, onClose, onSuccess }: Props) {
             </Select>
           </div>
 
-          {/* Footer */}
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
             <DialogClose asChild>
               <Button type="button" variant="outline" size="sm">
                 Cancelar
               </Button>
             </DialogClose>
-            <Button type="submit" size="sm" loading={isSubmitting}>
+            <Button type="submit" size="sm" loading={isSubmitting} disabled={operarioSinJuzgado}>
               Crear Ticket
             </Button>
           </div>

@@ -377,7 +377,7 @@ export default function ContratosPage() {
                 <Input
                   value={editForm.nro_contrato}
                   onChange={(e) => setEditForm((f) => ({ ...f, nro_contrato: e.target.value }))}
-                  className="h-9 text-sm font-mono"
+                  className="h-9 text-sm"
                   placeholder="Ej. CONT-2025-001"
                 />
               </div>

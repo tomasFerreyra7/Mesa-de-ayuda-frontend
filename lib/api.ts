@@ -35,6 +35,23 @@ api.interceptors.response.use(
   },
 );
 
+/** Extrae mensaje, código y status HTTP de un error de axios (para toasts y logs). */
+export function getApiErrorDetails(err: unknown): { message: string; status?: number; code?: string } {
+  const ax = err as {
+    response?: { status?: number; data?: { message?: unknown; code?: unknown } };
+    message?: string;
+  };
+  const status = ax.response?.status;
+  const data = ax.response?.data;
+  const rawMsg = data?.message;
+  let message: string;
+  if (typeof rawMsg === 'string') message = rawMsg;
+  else if (Array.isArray(rawMsg)) message = rawMsg.join(', ');
+  else message = ax.message ?? 'Error desconocido';
+  const code = typeof data?.code === 'string' ? data.code : undefined;
+  return { message, status, code };
+}
+
 // ─── Helpers para desempaquetar la respuesta del backend ──
 export function unwrap<T>(response: { data: { data: T } }): T {
   return response.data.data;
@@ -176,6 +193,10 @@ export interface User {
   iniciales?: string;
   avatarColor?: string;
   activo: boolean;
+  /** Juzgado asignado (operario): puede venir como id suelto o en relación */
+  juzgado_id?: number;
+  juzgado?: { id: number; nombre: string };
+  juzgadoIds?: number[];
 }
 
 export interface DashboardKPIs {
@@ -407,6 +428,8 @@ export interface CreateUsuarioDto {
   rol: string;
   avatarColor?: string;
   juzgadoIds?: number[];
+  /** Crear / actualizar usuario activo o dado de baja */
+  activo?: boolean;
 }
 
 export interface CreateCircunscripcionDto {

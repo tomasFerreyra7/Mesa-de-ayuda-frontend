@@ -583,7 +583,7 @@ export default function UbicacionesPage() {
                   <Input
                     value={form.codigo}
                     onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Ej. C1"
                     maxLength={20}
                     disabled={editTarget?.type === 'circunscripcion'}
@@ -637,7 +637,7 @@ export default function UbicacionesPage() {
                   <Input
                     value={form.codigo}
                     onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Ej. D1"
                     maxLength={20}
                     disabled={editTarget?.type === 'distrito'}
@@ -699,7 +699,7 @@ export default function UbicacionesPage() {
                   <Input
                     value={form.codigo}
                     onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Ej. JC01"
                     maxLength={20}
                     disabled={editTarget?.type === 'juzgado'}

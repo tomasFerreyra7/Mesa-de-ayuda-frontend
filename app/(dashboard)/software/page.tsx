@@ -388,13 +388,11 @@ export default function SoftwarePage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                  Nro. Software {creatingSoftware && <span className="text-destructive">*</span>}
-                </label>
+                  <label className="text-sm font-medium text-foreground">Nro. Software {creatingSoftware && <span className="text-destructive">*</span>}</label>
                   <Input
                     value={editForm.nro_sw}
                     onChange={(e) => setEditForm((f) => ({ ...f, nro_sw: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Ej. SW-001"
                   />
                 </div>

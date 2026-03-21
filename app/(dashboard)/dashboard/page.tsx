@@ -8,7 +8,7 @@ import { dashboardApi, ticketsApi, equiposApi, softwareApi, contratosApi } from 
 import type { DashboardKPIs, Alerta, Ticket as TicketType, Equipo, Software, Contrato } from '@/lib/api';
 import { KPICard } from '@/components/ui/kpi-card';
 import { EstadoBadge, PrioridadBadge } from '@/components/ui/badge';
-import { formatRelative, cn } from '@/lib/utils';
+import { formatRelative, cn, getOperarioJuzgadoId } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 
 const ROLES_TECNICOS = ['tecnico_interno', 'tecnico_proveedor'];
@@ -170,7 +170,7 @@ export default function DashboardPage() {
   const [recentTickets, setRecentTickets] = useState<TicketType[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const isTecnico = user?.rol && ROLES_TECNICOS.includes(user.rol);
+  const isTecnico = Boolean(user?.rol && ROLES_TECNICOS.includes(user.rol));
 
   useEffect(() => {
     if (isTecnico) router.replace('/tickets');
@@ -179,11 +179,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isTecnico) return;
     const load = async () => {
+      const opJid = getOperarioJuzgadoId(user ?? undefined);
       const ticketParams = {
         per_page: 6,
         page: 1,
-      } as { per_page: number; page: number; asignado_a_id?: number };
-      if (user?.id && isTecnico) ticketParams.asignado_a_id = user.id;
+        ...(opJid != null ? { juzgado_id: opJid } : {}),
+      } as { per_page: number; page: number; juzgado_id?: number };
       try {
         const [kpisRes, alertasRes, ticketsRes] = await Promise.allSettled([dashboardApi.kpis(), dashboardApi.alertas(), ticketsApi.list(ticketParams)]);
 
@@ -198,9 +199,10 @@ export default function DashboardPage() {
         }
 
         if (kpisRes.status !== 'fulfilled' || kpisRes.value?.data?.data == null) {
+          const listExtra = opJid != null ? { juzgado_id: opJid } : {};
           const [tAll, eRes, sRes, cRes] = await Promise.allSettled([
-            ticketsApi.list({ per_page: PER_PAGE, page: 1 }),
-            equiposApi.list({ per_page: PER_PAGE, page: 1 }),
+            ticketsApi.list({ per_page: PER_PAGE, page: 1, ...listExtra }),
+            equiposApi.list({ per_page: PER_PAGE, page: 1, ...listExtra }),
             softwareApi.list({ per_page: PER_PAGE }),
             contratosApi.list({ per_page: PER_PAGE }),
           ]);
@@ -216,7 +218,7 @@ export default function DashboardPage() {
       }
     };
     load();
-  }, [isTecnico, user?.id]);
+  }, [isTecnico, user]);
 
   if (isTecnico) return null;
 

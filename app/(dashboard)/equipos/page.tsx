@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, Search, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { motion } from 'framer-motion';
-import { equiposApi, ubicacionesApi } from '@/lib/api';
+import { equiposApi, ubicacionesApi, getApiErrorDetails } from '@/lib/api';
 import type { Equipo, EquipoFilters, PaginationMeta } from '@/lib/api';
 import { DataTable } from '@/components/ui/data-table';
 import { EquipoEstadoBadge } from '@/components/ui/badge';
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
-import { formatDate } from '@/lib/utils';
+import { formatDate, getOperarioJuzgadoId, normalizeRolString } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { toast } from 'sonner';
 
@@ -29,6 +29,8 @@ export default function EquiposPage() {
   const user = useAuthStore((s) => s.user);
   const canEdit = user?.rol && ROLES_CAN_EDIT.includes(user.rol);
   const isTecnico = user?.rol && ROLES_TECNICOS.includes(user.rol);
+  const isAdmin = normalizeRolString(user?.rol) === 'admin';
+  const operarioJuzgadoId = getOperarioJuzgadoId(user ?? undefined);
 
   useEffect(() => {
     if (isTecnico) router.replace('/tickets');
@@ -56,58 +58,92 @@ export default function EquiposPage() {
     observaciones: '',
   });
 
-  const load = useCallback(async (f: EquipoFilters) => {
-    setLoading(true);
-    try {
-      const res = await equiposApi.list(f);
-      setEquipos(res.data.data ?? []);
-      setMeta(res.data.meta);
-    } catch {
-      setEquipos(MOCK_EQUIPOS);
-      setMeta({ total: MOCK_EQUIPOS.length, page: 1, per_page: 20, pages: 1 });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (f: EquipoFilters) => {
+      setLoading(true);
+      try {
+        const params: EquipoFilters = { ...f };
+        const jid = getOperarioJuzgadoId(user ?? undefined);
+        // Con juzgado_id el backend filtra por juzgado del operario y no devuelve equipos sin puesto.
+        if (jid != null) params.juzgado_id = jid;
+        const res = await equiposApi.list(params);
+        setEquipos(res.data.data ?? []);
+        setMeta(res.data.meta);
+      } catch {
+        setEquipos(MOCK_EQUIPOS);
+        setMeta({ total: MOCK_EQUIPOS.length, page: 1, per_page: 20, pages: 1 });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user],
+  );
 
   useEffect(() => {
     load(filters);
   }, [filters, load]);
 
-  // Cargar puestos (juzgado + número) para el Select al abrir el modal de crear/editar
+  // Puestos: admin ve todos los juzgados; no-admin con juzgado asignado solo los de su juzgado (operario)
   useEffect(() => {
     if (!editEquipo && !creatingEquipo) return;
     setLoadingPuestos(true);
+
+    if (isAdmin) {
+      ubicacionesApi
+        .juzgados()
+        .then((jRes) => {
+          const raw = jRes.data as { data?: unknown[]; [k: string]: unknown };
+          const juzgados = (raw?.data ?? raw) as { id: number; nombre?: string; codigo?: string }[];
+          if (!Array.isArray(juzgados) || juzgados.length === 0) {
+            setPuestosOptions([]);
+            return;
+          }
+          return Promise.all(
+            juzgados.map((j) =>
+              ubicacionesApi.puestos(j.id).then((pRes) => {
+                const pr = pRes.data as { data?: unknown[]; [k: string]: unknown };
+                const puestos = (pr?.data ?? pr) as { id: number; numero?: number | string; descripcion?: string }[];
+                const nombreJuzgado = j.nombre ?? j.codigo ?? `Juzgado ${j.id}`;
+                return (Array.isArray(puestos) ? puestos : []).map((p) => ({
+                  id: p.id,
+                  label: `${nombreJuzgado} — Puesto ${p.numero ?? p.id}`,
+                }));
+              }),
+            ),
+          );
+        })
+        .then((arrays) => {
+          if (!arrays) return;
+          setPuestosOptions(arrays.flat());
+        })
+        .catch(() => setPuestosOptions([]))
+        .finally(() => setLoadingPuestos(false));
+      return;
+    }
+
+    if (operarioJuzgadoId == null) {
+      setPuestosOptions([]);
+      setLoadingPuestos(false);
+      return;
+    }
+
+    const nombreJuzgado = user?.juzgado?.nombre ?? `Juzgado #${operarioJuzgadoId}`;
     ubicacionesApi
-      .juzgados()
-      .then((jRes) => {
-        const raw = jRes.data as { data?: unknown[]; [k: string]: unknown };
-        const juzgados = (raw?.data ?? raw) as { id: number; nombre?: string; codigo?: string }[];
-        if (!Array.isArray(juzgados) || juzgados.length === 0) {
-          setPuestosOptions([]);
-          return;
-        }
-        return Promise.all(
-          juzgados.map((j) =>
-            ubicacionesApi.puestos(j.id).then((pRes) => {
-              const pr = pRes.data as { data?: unknown[]; [k: string]: unknown };
-              const puestos = (pr?.data ?? pr) as { id: number; numero?: number | string; descripcion?: string }[];
-              const nombreJuzgado = j.nombre ?? j.codigo ?? `Juzgado ${j.id}`;
-              return (Array.isArray(puestos) ? puestos : []).map((p) => ({
-                id: p.id,
-                label: `${nombreJuzgado} — Puesto ${p.numero ?? p.id}`,
-              }));
-            }),
-          ),
+      .puestos(operarioJuzgadoId)
+      .then((pRes) => {
+        const pr = pRes.data as { data?: unknown[]; [k: string]: unknown };
+        const puestos = (pr?.data ?? pr) as { id: number; numero?: number | string }[];
+        const list = Array.isArray(puestos) ? puestos : [];
+        setPuestosOptions(
+          list.map((p) => ({
+            id: p.id,
+            label: `${nombreJuzgado} — Puesto ${p.numero ?? p.id}`,
+          })),
         );
-      })
-      .then((arrays) => {
-        if (!arrays) return;
-        setPuestosOptions(arrays.flat());
       })
       .catch(() => setPuestosOptions([]))
       .finally(() => setLoadingPuestos(false));
-  }, [editEquipo, creatingEquipo]);
+  }, [editEquipo, creatingEquipo, isAdmin, operarioJuzgadoId, user?.juzgado?.nombre]);
 
   const openEdit = (e: Equipo) => {
     setEditEquipo(e);
@@ -169,8 +205,15 @@ export default function EquiposPage() {
       setEditEquipo(null);
       setCreatingEquipo(false);
       load(filters);
-    } catch {
-      toast.error('Error al guardar');
+    } catch (err: unknown) {
+      const { message, status, code } = getApiErrorDetails(err);
+      if (status === 403 || code === 'FORBIDDEN') {
+        toast.error(
+          'No tenés permiso para crear o modificar equipos (403). El servidor solo acepta ciertos roles: pedí a un administrador que habilite tu usuario o revisá la configuración del backend.',
+        );
+      } else {
+        toast.error(message || 'Error al guardar');
+      }
     } finally {
       setSaving(false);
     }
@@ -285,8 +328,25 @@ export default function EquiposPage() {
 
   if (isTecnico) return null;
 
+  const isOperarioUser = !isAdmin && normalizeRolString(user?.rol) === 'operario';
+  const equiposEmptyMessage = isOperarioUser
+    ? 'No hay equipos con puesto en tu juzgado para estos filtros. El stock sin ubicar no se muestra a operarios.'
+    : 'No se encontraron equipos';
+
   return (
     <div className="space-y-4">
+      {isOperarioUser && operarioJuzgadoId != null && (
+        <p className="text-xs text-muted-foreground rounded-lg border border-border bg-secondary/40 px-3 py-2">
+          Como <strong className="text-foreground">operario</strong> solo ves equipos con <strong className="text-foreground">puesto</strong> en tu juzgado. Los
+          equipos sin ubicación no aparecen aquí; un administrador ve el inventario completo.
+        </p>
+      )}
+      {isOperarioUser && operarioJuzgadoId == null && (
+        <p className="text-xs text-destructive rounded-lg border border-danger/30 bg-danger-light/50 px-3 py-2">
+          Tu usuario operario no tiene juzgado asignado. Un <strong>administrador</strong> debe asociarte a un juzgado en <strong>Usuarios</strong> para usar
+          inventario y tickets correctamente.
+        </p>
+      )}
       {/* Toolbar */}
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-3 w-full">
         <div className="relative flex-1 min-w-44 max-w-72">
@@ -369,7 +429,7 @@ export default function EquiposPage() {
         meta={meta}
         isLoading={loading}
         onPageChange={(page) => setFilters((p) => ({ ...p, page }))}
-        emptyMessage="No se encontraron equipos"
+        emptyMessage={equiposEmptyMessage}
       />
 
       <Dialog
@@ -395,7 +455,7 @@ export default function EquiposPage() {
                   <Input
                     value={editForm.nro_inventario}
                     onChange={(e) => setEditForm((f) => ({ ...f, nro_inventario: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Texto"
                   />
                 </div>
@@ -404,7 +464,7 @@ export default function EquiposPage() {
                   <Input
                     value={editForm.nro_serie}
                     onChange={(e) => setEditForm((f) => ({ ...f, nro_serie: e.target.value }))}
-                    className="h-9 text-sm font-mono"
+                    className="h-9 text-sm"
                     placeholder="Texto"
                   />
                 </div>
@@ -475,10 +535,15 @@ export default function EquiposPage() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Puesto</label>
+                  {!isAdmin && operarioJuzgadoId == null && (
+                    <p className="text-xs text-destructive">
+                      Tu usuario no tiene juzgado asignado. No podés asociar puestos hasta que un administrador te asocie a un juzgado.
+                    </p>
+                  )}
                   <Select
                     value={editForm.puesto_id || '__none__'}
                     onValueChange={(v) => setEditForm((f) => ({ ...f, puesto_id: v === '__none__' ? '' : v }))}
-                    disabled={loadingPuestos}
+                    disabled={loadingPuestos || (!isAdmin && operarioJuzgadoId == null)}
                   >
                     <SelectTrigger className="h-9 text-sm">
                       <SelectValue placeholder={loadingPuestos ? 'Cargando puestos…' : 'Sin asignar'} />

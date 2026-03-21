@@ -29,12 +29,15 @@ export const useAuthStore = create<AuthState>()(
 
       setAuth: (user, token) => {
         localStorage.setItem('access_token', token);
+        // Cookie legible por middleware para bloquear navegación no autenticada
+        document.cookie = `access_token=${encodeURIComponent(token)}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax`;
         // Marcar como hidratado para que el layout del dashboard no quede en blanco al entrar desde login
         set({ user, token, isAuthenticated: true, _hasHydrated: true });
       },
 
       logout: () => {
         localStorage.removeItem('access_token');
+        document.cookie = 'access_token=; Path=/; Max-Age=0; SameSite=Lax';
         set({ user: null, token: null, isAuthenticated: false });
       },
 

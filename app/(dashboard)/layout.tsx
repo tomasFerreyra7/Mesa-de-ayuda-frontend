@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppHeader } from '@/components/layout/app-header';
 import { useUIStore } from '@/store/ui.store';
 import { cn } from '@/lib/utils';
+import { authApi } from '@/lib/api';
+import { normalizeUserFromApi } from '@/lib/normalize-user';
 
 const HYDRATE_TIMEOUT_MS = 2000;
 
@@ -14,8 +16,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   const setHasHydrated = useAuthStore((s) => s.setHasHydrated);
+  const updateUser = useAuthStore((s) => s.updateUser);
   const router = useRouter();
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
+  const meFetched = useRef(false);
 
   // Si por algún motivo persist no dispara onRehydrateStorage, forzar hidratación tras un tiempo
   useEffect(() => {
@@ -30,6 +34,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.push('/login');
     }
   }, [hasHydrated, isAuthenticated, router]);
+
+  // Sincronizar usuario con el backend (p. ej. juzgado_id / juzgado para operarios) sin obligar a cerrar sesión
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || meFetched.current) return;
+    meFetched.current = true;
+    authApi
+      .me()
+      .then((res) => {
+        const payload = (res.data?.data ?? res.data) as unknown;
+        const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
+        const rawUser = (p?.usuario ?? p?.user ?? p) as Record<string, unknown> | undefined;
+        if (rawUser && typeof rawUser === 'object' && rawUser.id != null) {
+          updateUser(normalizeUserFromApi(rawUser));
+        }
+      })
+      .catch(() => {
+        // sesión inválida: el interceptor suele hacer logout
+      });
+  }, [hasHydrated, isAuthenticated, updateUser]);
 
   if (!hasHydrated) {
     return (
